@@ -1,0 +1,1 @@
+# vigvita-app-desktop-build-tauri
