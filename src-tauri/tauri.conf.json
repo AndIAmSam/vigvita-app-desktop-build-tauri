@@ -1,0 +1,47 @@
+{
+  "$schema": "https://schema.tauri.app/config/2",
+  "productName": "vigvita-app",
+  "version": "0.1.0",
+  "identifier": "com.tauri.dev",
+  "build": {
+    "frontendDist": "../app/dist",
+    "devUrl": "http://localhost:8081",
+    "beforeDevCommand": "npm run start",
+    "beforeBuildCommand": "npx expo export -p web"
+  },
+  "app": {
+    "windows": [
+      {
+        "title": "Vigvita App",
+        "width": 1000,
+        "height": 800,
+        "resizable": true,
+        "fullscreen": false,
+        "visible": true
+      }
+    ],
+    "security": {
+      "csp": null
+    }
+  },
+  "bundle": {
+    "active": true,
+    "createUpdaterArtifacts": true,
+    "targets": "all",
+    "icon": [
+      "icons/32x32.png",
+      "icons/128x128.png",
+      "icons/128x128@2x.png",
+      "icons/icon.icns",
+      "icons/icon.ico"
+    ]
+  },
+  "plugins": {
+    "updater": {
+      "pubkey": "dW50cnVzdGVkIGNvbW1lbnQ6IG1pbmlzaWduIHB1YmxpYyBrZXk6IDc3OEQ2RUM2QTFCMkQ2M0YKUldRLzFyS2h4bTZOZHkvWGU1U3VKdVFTRVZaeTh5dnpteUgzOEJNWFk2SWhFSnhpeTJjS3hSSVAK",
+      "endpoints": [
+        "https://github.com/AndIAmSam/vigvita-app-desktop-build-tauri/releases/latest/download/latest.json"
+      ]
+    }
+  }
+}
