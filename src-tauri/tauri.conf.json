@@ -2,7 +2,7 @@
   "$schema": "https://schema.tauri.app/config/2",
   "productName": "vigvita-app",
   "version": "0.1.0",
-  "identifier": "com.tauri.dev",
+  "identifier": "com.vigvita.app",
   "build": {
     "frontendDist": "../app/dist",
     "devUrl": "http://localhost:8081",
