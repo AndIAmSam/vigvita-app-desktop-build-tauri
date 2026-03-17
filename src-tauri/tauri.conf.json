@@ -37,7 +37,7 @@
   },
   "plugins": {
     "updater": {
-      "pubkey": "dW50cnVzdGVkIGNvbW1lbnQ6IG1pbmlzaWduIHB1YmxpYyBrZXk6IDc3OEQ2RUM2QTFCMkQ2M0YKUldRLzFyS2h4bTZOZHkvWGU1U3VKdVFTRVZaeTh5dnpteUgzOEJNWFk2SWhFSnhpeTJjS3hSSVAK",
+      "pubkey": "dW50cnVzdGVkIGNvbW1lbnQ6IG1pbmlzaWduIHB1YmxpYyBrZXk6IERCM0Q4OTlDQ0U2NTE3RApSV1I5VWViTW1kaXpEWlBLV1dOeSsyUWZ2Y3h2RS9ETmUva2RrUUNqK2xJTzNoQTRMTFZYM3dpago=",
       "endpoints": [
         "https://github.com/AndIAmSam/vigvita-app-desktop-build-tauri/releases/latest/download/latest.json"
       ]
