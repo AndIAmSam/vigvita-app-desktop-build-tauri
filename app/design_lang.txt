@@ -1,0 +1,102 @@
+# VIGVITA FINANCIAL DESIGN SYSTEM (V1.0)
+Este documento define las reglas visuales para todo el software de la marca (Apps, Web, Dashboards).
+
+## 1. PALETA DE COLORES (Brand Colors)
+Deben usarse exactamente estos códigos hexadecimales.
+
+**Principales:**
+- Azul Corporativo (Primary): `#2665ad` (Usar en: Iconos principales, acciones secundarias, bordes activos)
+- Azul Acento (Secondary): `#0e8ece` (Usar en: Degradados, detalles sutiles)
+- Verde Éxito (Success/Money): `#8cbe27` (Usar en: Dinero, confirmaciones, botones de 'siguiente')
+- Negro Puro (Strong): `#161616` (Usar en: Títulos, Botones de acción principal 'Call to Action')
+
+**Superficies y Fondos:**
+- Fondo App (Background): `#F9FAFB` (Gris muy sutil, casi blanco)
+- Fondo Cards (Surface): `#FFFFFF` (Blanco puro)
+- Fondo Inputs (Inputs): `#F3F4F6` (Gris claro para cajas de texto)
+- Deshabilitado: `#E5E5E5`
+
+**Texto:**
+- Títulos: `#161616` (Negro)
+- Subtítulos/Labels: `#6b7280` (Gris medio)
+- Placeholders: `#9ca3af` (Gris claro)
+
+**Alertas:**
+- Rojo (Error/Peligro): `#ef4444`
+- Naranja (Incapacidad/Alerta): `#f97316`
+- Amarillo (Precaución): `#facc15`
+
+---
+
+## 2. GEOMETRÍA Y FORMAS (The "Apple" Feel)
+
+**Bordes (Border Radius):**
+- Cards Contenedoras: `26px` (Curva pronunciada y suave)
+- Botones e Inputs: `12px` a `16px` (Squircle)
+- Modales/Hojas: `30px` (Solo bordes superiores)
+
+**Sombras (Depth):**
+*Estilo: Suave, difusa y profunda (No dura).*
+- Sombra Card: 
+  - Offset: `{ width: 0, height: 12 }`
+  - Opacity: `0.08` (Muy sutil)
+  - Radius: `24`
+  - Color: `#000`
+
+---
+
+## 3. TIPOGRAFÍA (Hierarchy)
+
+**Fuente:** System Default (San Francisco en iOS, Roboto en Android, Inter/Roboto en Web).
+
+**Estilos:**
+- **Header Grande:** Size 28, Weight 800 (Extra Bold), Tracking -0.5.
+- **Subtítulo (Eyebrow):** Size 12, Weight 700, Uppercase, Tracking 1.5, Color Azul o Gris.
+- **Labels Inputs:** Size 12, Weight 600, Color Gris Texto.
+- **Cifras/Dinero:** Size 18-24, Weight 800/900.
+
+---
+
+## 4. COMPONENTES BASE (Atomos)
+
+**A. Inputs (Campos de Texto):**
+- Sin bordes visibles por defecto (border-width: 0).
+- Fondo gris claro (`#F3F4F6`).
+- Texto interior negro negrita (`fontWeight: '600'`).
+- Icono a la izquierda opcional (gris).
+
+**B. Botones (Primary):**
+- Fondo Negro (`#161616`) o Verde (`#8cbe27`).
+- Texto Blanco, Bold.
+- Sombra sutil.
+- Icono a la derecha opcional.
+
+**C. Cards (Contenedores):**
+- Fondo Blanco.
+- Padding interno: `24px`.
+- Separación entre cards: `20px`.
+
+**D. Listas / Tablas:**
+- Encabezados: Fondo Verde (`#8cbe27`), Texto Blanco Bold.
+- Filas: Alternadas (Zebra) entre Blanco y Verde Muy Claro (`#f0fdf4`).
+
+---
+
+## 5. ANIMACIONES (Motion Design)
+
+*Regla de Oro: Nada aparece de golpe. Todo fluye.*
+
+1. **Entrada en Cascada (Stagger):**
+   - Los elementos no entran todos juntos.
+   - Orden: Header -> Card 1 -> Card 2 -> Footer.
+   - Delay entre elementos: `100ms` a `200ms`.
+
+2. **Tipo de Movimiento:**
+   - **Slide Up:** Los elementos suben 50px mientras aparecen (Fade In).
+   - **Spring (Rebote):** Al llegar a su posición final, tienen un rebote muy sutil (Friction: 7, Tension: 40).
+
+---
+
+## 6. TEXTURA DE FONDO (Atmósfera)
+- No usar fondos planos sólidos.
+- Usar "Blobs" (Círculos difuminados) de colores de marca (Azul1, Verde, Azul2) posicionados en las esquinas con opacidad baja (0.2) y desenfoque (Blur) alto.

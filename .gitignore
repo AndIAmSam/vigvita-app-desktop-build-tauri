@@ -1,2 +1,4 @@
-# Ignorar la carpeta app copiada
-app/
+# Node
+app/node_modules/
+app/dist/
+app/.expo/

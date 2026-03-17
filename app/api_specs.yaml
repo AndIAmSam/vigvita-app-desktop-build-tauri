@@ -1,0 +1,159 @@
+global_specs:
+  scope: "/*"
+
+  constraints:
+    max_body_size: 5mb
+    max_header_size: 1mb
+    timeout: 30s
+
+    on_request_limit_exceeded:
+      action: "Connection Termination"
+      description: "The server will forcefully close the TCP connection to prevent resource exhaustion."
+
+  # Standard responses for any endpoint
+  default_responses:
+    500:
+      contentType: text/plain
+      body: "Internal server error"
+      reason: "Unexpected server-side failure"
+
+    504:
+      contentType: text/plain
+      body: 504 Gateway Time-out
+      reason: "The server took too long to respond (AWS ALB limit)"
+
+global_post_specs:
+  scope: "POST /*"
+
+  # Standar requirements for any POST endpoint
+  request:
+    contentType: application/json
+
+  # Standard responses for any POST endpoint
+  response:
+    400:
+      - contentType: text/plain
+        body: Bad Request
+        reason: The HTTP request body is malformed or cannot be parsed
+
+middlewares:
+  auth:
+    description: "Verifies user session using Authorization (Bearer <token>) header or (session) cookie."
+    on_failure:
+      status: 404
+      contentType: "text/html"
+
+  super_admin:
+    description: "Restricts access to users with the SuperAdmin role."
+    on_failure:
+      status: 404
+      contentType: "text/html"
+
+/api/signup:
+  request:
+    method: POST
+    body:
+      name:
+        required: true
+        min: 5
+        max: 255
+      email:
+        required: true
+        max: 255
+      password:
+        required: true
+        min: 8
+        max: 255
+      token:
+        required: conditional # Mandatory except during super admin initialization.
+        description: |
+          If not provided in the body, it must be sent as a URL query parameter
+          (e.g., /api/signup?setup_key=<value>) for super admin registration.
+
+  responses:
+    201:
+      - contentType: application/json
+        reason: User created successfully and invitation marked as used
+        body: { "status": "success" }
+
+    403:
+      - contentType: application/json
+        reason: The token hash does not match any active invitation or is already accepted/expired
+        body: {"error": "invalid_token"}
+
+      - contentType: application/json
+        reason: The provided email does not match the email associated with the token
+        body: {"error": "email_mismatch"}
+
+    422:
+      - contentType: application/json
+        reason: One or more fields failed format validation (email format, password length, etc)
+        body: { "errors": { "field_name": "error_slug" } }
+
+/api/login:
+  request:
+    method: POST
+    body:
+      email:
+        required: true
+      password:
+        required: true
+
+  responses:
+    200:
+      - contentType: application/json
+        reason: Credentials verified and session created
+        body: { "token": "string" }
+
+    401:
+      - contentType: application/json
+        reason: "The email doesn't exist or the password is incorrect"
+        body: { "error": "invalid_credentials" }
+
+    403:
+      - contentType: application/json
+        reason: "The user's access period (employment_period) has expired"
+        body: { "error": "employment_period_ended" }
+
+    422:
+      - contentType: application/json
+        reason: "Required fields are missing or empty"
+        body: { "error": "missing_required_fields" }
+
+/api/admin/user:
+  middlewares: [auth, super_admin]
+
+  request:
+    method: POST
+    body:
+      email:
+        required: true
+      role:
+        required: true
+        type: string
+        description: "Must match a valid system role (e.g., SuperAdmin, Admin, Advisor)"
+      leader:
+        required: false
+        type: string
+        description: "Email of an existing and active user"
+
+  responses:
+    201:
+      - contentType: application/json
+        reason: Invitation created successfully and token generated
+        body: { "token": "string" }
+
+    400:
+      - contentType: application/json
+        reason: The provided leader email does not exist
+        body: { "error": "invalid_leader" }
+
+    409:
+      - contentType: application/json
+        reason: An active invitation already exists for this email address
+        body: { "error": "invitation_already_sent" }
+
+    422:
+      - contentType: application/json
+        reason: Email format is invalid or the role does not exist in the system
+        body: { "errors": { "field_name": "error_slug" } }
