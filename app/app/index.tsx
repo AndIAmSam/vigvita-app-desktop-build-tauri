@@ -217,7 +217,7 @@ export default function LoginScreen() {
                                     style={styles.secondaryLogo}
                                     resizeMode="contain"
                                 />
-                                <Text style={styles.versionText}>v1.2.1 (Beta 33 - Tauri)</Text>
+                                <Text style={styles.versionText}>v0.2.2 (Beta 333.333 - Tauri)</Text>
                             </View>
                         </View>
 
