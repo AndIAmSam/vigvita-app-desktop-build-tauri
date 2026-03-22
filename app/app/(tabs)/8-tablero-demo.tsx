@@ -365,7 +365,7 @@ export default function TableroCopiaScreen() {
                         activeOpacity={0.7}
                     >
                         <View style={{ flexDirection: 'row', alignItems: 'center' }}>
-                            <Text style={styles.sectionTitle}>Base de Prospectos</Text>
+                            <Text style={styles.sectionTitle}>Lista de Prospectos</Text>
                             <View style={styles.badgeCount}><Text style={styles.badgeText}>{filteredClients.length}</Text></View>
                         </View>
                         <FontAwesome name={isClientsExpanded ? "chevron-up" : "chevron-down"} size={16} color={COLORS.azul1} />
@@ -429,7 +429,7 @@ export default function TableroCopiaScreen() {
                         activeOpacity={0.7}
                     >
                         <View style={{ flexDirection: 'row', alignItems: 'center' }}>
-                            <Text style={styles.sectionTitle}>Base de Referidos</Text>
+                            <Text style={styles.sectionTitle}>Lista de Referidos</Text>
                             <View style={[styles.badgeCount, { backgroundColor: COLORS.grisInput }]}><Text style={styles.badgeText}>{filteredReferidos.length}</Text></View>
                         </View>
                         <FontAwesome name={isRefsExpanded ? "chevron-up" : "chevron-down"} size={16} color={COLORS.verde} />
