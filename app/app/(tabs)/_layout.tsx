@@ -1,7 +1,8 @@
 import React, { useEffect, useRef, useState } from 'react';
 import { Tabs } from 'expo-router';
-import { View, StyleSheet, useWindowDimensions, TouchableOpacity, Animated, Platform, Text } from 'react-native';
+import { View, StyleSheet, useWindowDimensions, TouchableOpacity, Animated, Text } from 'react-native';
 import { FontAwesome } from '@expo/vector-icons';
+import { useFinancialData } from '../../context/FinancialContext';
 
 // --- COLORES ---
 const COLORS = {
@@ -177,30 +178,48 @@ function CustomTabBar({ state, descriptors, navigation }: any) {
 
 // --- EXPORTACIÓN PRINCIPAL ---
 export default function TabLayout() {
-  return (
-    <Tabs
-      tabBar={props => <CustomTabBar {...props} />}
-      screenOptions={{
-        headerShown: false, // Ocultar header por defecto
-        tabBarHideOnKeyboard: true, // Ocultar en teclado
-      }}
-    >
-      {/* Definición simple de rutas, ya que el diseño lo controla CustomTabBar */}
-      <Tabs.Screen name="0-entrevista" />
-      <Tabs.Screen name="1-piramide" />
-      <Tabs.Screen name="2-educacion" />
-      <Tabs.Screen name="3-jubilacion" />
-      <Tabs.Screen name="4-general" />
-      <Tabs.Screen name="5-necesidades" />
-      <Tabs.Screen name="6-detalle" />
-      <Tabs.Screen name="9-propuesta" />
-      <Tabs.Screen name="7-referidos" />
-      <Tabs.Screen name="8-tablero-demo" />
+  const { lastSyncTime, syncStatus, isOnline } = useFinancialData();
 
-      {/* Rutas ocultas del TabBar */}
-      <Tabs.Screen name="8-tablero" options={{ href: null }} />
-      <Tabs.Screen name="9-notas" options={{ href: null }} />
-    </Tabs>
+  return (
+    <View style={{ flex: 1 }}>
+      <Tabs
+        tabBar={props => <CustomTabBar {...props} />}
+        screenOptions={{
+          headerShown: false, // Ocultar header por defecto
+          tabBarHideOnKeyboard: true, // Ocultar en teclado
+        }}
+      >
+        {/* Definición simple de rutas, ya que el diseño lo controla CustomTabBar */}
+        <Tabs.Screen name="0-entrevista" />
+        <Tabs.Screen name="1-piramide" />
+        <Tabs.Screen name="2-educacion" />
+        <Tabs.Screen name="3-jubilacion" />
+        <Tabs.Screen name="4-general" />
+        <Tabs.Screen name="5-necesidades" />
+        <Tabs.Screen name="6-detalle" />
+        <Tabs.Screen name="9-propuesta" />
+        <Tabs.Screen name="7-referidos" />
+        <Tabs.Screen name="8-tablero-demo" />
+
+        {/* Rutas ocultas del TabBar */}
+        <Tabs.Screen name="8-tablero" options={{ href: null }} />
+        <Tabs.Screen name="9-notas" options={{ href: null }} />
+      </Tabs>
+
+      {/* Indicador de última sincronización global flotante superior */}
+      {lastSyncTime && isOnline && syncStatus === 'synced' && (
+        <View style={styles.syncIndicator}>
+          <FontAwesome name="check-circle" size={10} color={COLORS.active} style={{ marginRight: 4 }} />
+          <Text style={styles.syncIndicatorText}>Sincronizado: {lastSyncTime}</Text>
+        </View>
+      )}
+      {syncStatus === 'syncing' && isOnline && (
+        <View style={styles.syncIndicator}>
+          <FontAwesome name="refresh" size={10} color="#f59e0b" style={{ marginRight: 4 }} />
+          <Text style={[styles.syncIndicatorText, { color: '#f59e0b' }]}>Sincronizando...</Text>
+        </View>
+      )}
+    </View>
   );
 }
 
@@ -226,5 +245,27 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
     height: '100%',
     zIndex: 10, // Asegura que el botón esté encima del fondo animado
+  },
+  syncIndicator: {
+    position: 'absolute',
+    top: 40, // Espacio suficiente para notches en iOS/Android
+    right: 20,
+    flexDirection: 'row',
+    alignItems: 'center',
+    backgroundColor: 'rgba(255, 255, 255, 0.85)',
+    paddingHorizontal: 8,
+    paddingVertical: 4,
+    borderRadius: 12,
+    shadowColor: "#000",
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.1,
+    shadowRadius: 4,
+    elevation: 3,
+    zIndex: 999,
+  },
+  syncIndicatorText: {
+    fontSize: 10,
+    color: '#64748b',
+    fontWeight: '500',
   }
 });

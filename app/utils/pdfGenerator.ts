@@ -6,35 +6,39 @@ import * as FileSystem from "expo-file-system";
 
 const styles = `
   @page { margin: 20px; }
-  body { font-family: 'Helvetica', 'Arial', sans-serif; font-size: 11px; color: #000; background: #fff; padding: 20px; }
+  /* Se agregó line-height general y padding inferior al body para evitar recortes */
+  body { font-family: 'Helvetica', 'Arial', sans-serif; font-size: 11px; color: #000; background: #fff; padding: 20px 20px 40px 20px; line-height: 1.4; }
   
   .header-container { display: flex; align-items: center; justify-content: space-between; border-bottom: 2px solid #000; padding-bottom: 10px; margin-bottom: 10px; }
   .logo { max-height: 60px; width: auto; max-width: 150px; } 
   .header-text { text-align: right; }
   
-  h1 { font-size: 16px; text-transform: uppercase; margin: 0; }
-  h2 { font-size: 12px; background-color: #f0f0f0; padding: 4px; margin-top: 15px; margin-bottom: 8px; border-top: 1px solid #000; border-bottom: 1px solid #000; text-transform: uppercase; }
+  h1 { font-size: 16px; text-transform: uppercase; margin: 0; line-height: 1.2; }
+  h2 { font-size: 12px; background-color: #f0f0f0; padding: 4px; margin-top: 15px; margin-bottom: 8px; border-top: 1px solid #000; border-bottom: 1px solid #000; text-transform: uppercase; line-height: 1.2; }
   
-  table { width: 100%; border-collapse: collapse; margin-bottom: 8px; font-size: 10px; }
-  th { border-bottom: 1px solid #000; text-align: left; padding: 3px; font-weight: bold; background-color: #eee; }
-  td { border-bottom: 1px solid #ddd; padding: 3px; vertical-align: top; }
+  table { width: 100%; border-collapse: collapse; margin-bottom: 8px; font-size: 10px; page-break-inside: auto; }
+  tr { page-break-inside: avoid; page-break-after: auto; }
+  th { border-bottom: 1px solid #000; text-align: left; padding: 5px 3px; font-weight: bold; background-color: #eee; vertical-align: middle; }
+  td { border-bottom: 1px solid #ddd; padding: 5px 3px; vertical-align: middle; line-height: 1.3; }
   
-  .row { display: flex; justify-content: space-between; border-bottom: 1px dotted #ccc; padding: 2px 0; }
-  .label { font-weight: bold; color: #444; width: 65%; }
-  .value { text-align: right; width: 35%; }
+  .row { display: flex; justify-content: space-between; align-items: center; border-bottom: 1px dotted #ccc; padding: 4px 0; page-break-inside: avoid; }
+  .label { font-weight: bold; color: #444; width: 65%; padding-right: 5px; }
+  .value { text-align: right; width: 35%; line-height: 1.2; }
   
-  .total-box { border: 2px solid #000; padding: 8px; margin-top: 5px; text-align: center; font-weight: bold; font-size: 12px; background-color: #f9f9f9; }
-  .disclaimer { font-size: 8px; text-align: center; margin-top: 20px; color: #666; font-style: italic; }
+  /* La clase total-box ya incluye el fondo gris #f9f9f9 por defecto */
+  .total-box { border: 2px solid #000; padding: 8px; margin-top: 5px; text-align: center; font-weight: bold; font-size: 12px; background-color: #f9f9f9; page-break-inside: avoid; }
+  
+  /* Se modificó para evitar cortes */
+  .disclaimer { font-size: 8px; text-align: center; margin-top: 20px; padding-bottom: 20px; color: #666; font-style: italic; page-break-inside: avoid; display: block; }
   .no-aplica { color: #999; font-style: italic; }
   
   .grid { display: flex; flex-wrap: wrap; gap: 15px; }
   .col { flex: 1; min-width: 45%; }
-  .sub-title { font-weight: bold; border-bottom: 1px solid #999; margin-bottom: 4px; margin-top: 4px; font-size: 10px; text-transform: uppercase; }
+  .sub-title { font-weight: bold; border-bottom: 1px solid #999; margin-bottom: 4px; margin-top: 4px; font-size: 10px; text-transform: uppercase; padding-bottom: 2px; }
 `;
 
 export const generatePDF = async (data: any, type: "cliente" | "asesor") => {
   // --- LÓGICA DE CARGA DE LOGOS ---
-  // Función auxiliar para cargar imagen a Base64
   const loadLogo = async (path: any) => {
     try {
       const asset = Asset.fromModule(path);
@@ -60,10 +64,9 @@ export const generatePDF = async (data: any, type: "cliente" | "asesor") => {
     }
   };
 
-  // Cargar ambos logos en paralelo
   const [logoBase64, logo2Base64] = await Promise.all([
     loadLogo(require("../assets/logo.png")),
-    loadLogo(require("../assets/metlife-logo.png")), // Asegúrate de tener esta imagen
+    loadLogo(require("../assets/metlife-logo.png")),
   ]);
 
   const widths = ["35%", "55%", "75%", "95%"];
@@ -85,11 +88,6 @@ export const generatePDF = async (data: any, type: "cliente" | "asesor") => {
     day: "numeric",
   });
 
-  // --------------------------------------------------------------------------
-  // CORRECCIONES LÓGICAS (CÁLCULOS LOCALES PARA GARANTIZAR PRECISIÓN)
-  // --------------------------------------------------------------------------
-
-  // 1. CORRECCIÓN INGRESO (Dividir prestaciones anuales entre 12)
   const prestTitularMensual = parse(data.ingresos.prestacionesTitular) / 12;
   const prestConyugeMensual = parse(data.ingresos.prestacionesConyuge) / 12;
   const totalIngresosMensualesReal =
@@ -98,28 +96,21 @@ export const generatePDF = async (data: any, type: "cliente" | "asesor") => {
     prestTitularMensual +
     prestConyugeMensual;
 
-  // 2. CORRECCIÓN ACTIVOS (Excluir Casa del análisis de protección)
   const activosSinCasa =
     parse(data.activos.ahorros) +
     parse(data.activos.otrosInmuebles) +
     parse(data.activos.vehiculos) +
     parse(data.activos.inversiones) +
     parse(data.activos.otros);
-  // Nota: data.activos.casa SE IGNORA AQUI
 
-  // 3. RE-CÁLCULO DE CAPACIDAD DE AHORRO (Usando el ingreso corregido)
   const capacidadAhorroReal =
     totalIngresosMensualesReal - data.totales.gastosTotales;
 
-  // 4. RE-CÁLCULO DEL DÉFICIT (Usando activos sin casa)
-  // Fórmula: Capital Necesario + Gastos Inmediatos - Activos(Sin Casa) - Seguros
   const deficitRealCorregido =
     data.totales.capitalNecesario +
     data.totales.gastosInmediatos -
     activosSinCasa -
     data.totales.totalSeguros;
-
-  // --------------------------------------------------------------------------
 
   let dependientesHtml = '<span class="no-aplica">Ninguno</span>';
   if (
@@ -140,7 +131,6 @@ export const generatePDF = async (data: any, type: "cliente" | "asesor") => {
     dependientesHtml = data.perfil.dependientes;
   }
 
-  // INICIO HTML
   let html = `
     <html>
       <head><meta charset="utf-8"><style>${styles}</style></head>
@@ -170,7 +160,7 @@ export const generatePDF = async (data: any, type: "cliente" | "asesor") => {
 
   if (type === "asesor") {
     html += `
-        <h2>0. Perfil del Cliente</h2>
+        <h2 style="background-color: #2665ad; color: white; padding-bottom: 10px;">0. Perfil del Cliente</h2>
         <div class="grid">
             <div class="col">
                 <div class="row"><span class="label">Nombre:</span> <span class="value">${txt(data.nombreCliente)}</span></div>
@@ -204,42 +194,49 @@ export const generatePDF = async (data: any, type: "cliente" | "asesor") => {
   if (data.piramideLevels && data.piramideLevels.length > 0) {
     html += `
         <h2>Estrategia Patrimonial (Prioridades)</h2>
-        <div style="display: flex; flex-direction: column; align-items: center; justify-content: center; margin-bottom: 20px;">
+        <div style="display: block; width: 100%; margin-bottom: 20px; text-align: center;">
             ${data.piramideLevels
         .map((level: any, index: number) => {
           const priorityNum = data.piramideLevels.length - index;
+
+          // SOLUCIÓN DEFINITIVA: Alturas exactas, line-height con !important y bloqueos de margen
           return `
-                <div style="width: ${widths[index]}; background-color: ${level.color}; color: white; padding: 8px 15px; margin-bottom: 4px; font-weight: bold; border-radius: 20px; text-transform: uppercase; font-size: 10px; letter-spacing: 1px; display: flex; align-items: center; justify-content: center; position: relative; box-shadow: 0 2px 4px rgba(0,0,0,0.2);">
-                    <div style="position: absolute; left: 10px; background-color: rgba(255,255,255,0.3); border-radius: 50%; width: 18px; height: 18px; display: flex; align-items: center; justify-content: center; font-size: 10px; color: #fff; border: 1px solid rgba(255,255,255,0.6); font-weight: bold;">${priorityNum}</div>
-                    ${level.label}
+                <div style="width: ${widths[index]}; background-color: ${level.color}; color: white; margin: 0 auto 5px auto; font-weight: bold; border-radius: 20px; text-transform: uppercase; font-size: 10px; letter-spacing: 1px; position: relative; box-shadow: 0 2px 4px rgba(0,0,0,0.2); box-sizing: border-box; padding: 6px 15px 12px 35px;">
+                    
+                    <div style="position: absolute; top: 7px; left: 10px; background-color: rgba(255,255,255,0.3); border-radius: 50%; width: 18px; height: 18px; text-align: center; border: 1px solid rgba(255,255,255,0.6); box-sizing: border-box; padding-bottom: 8px;">
+                        <span style="font-size: 10px; font-weight: bold; position: relative; top: -4px;">${priorityNum}</span>
+                    </div>
+
+                    <span style="position: relative; top: -2px;">${level.label}</span>
+
                 </div>
             `;
         })
         .join("")}
         </div>
-                        <div style="margin-top:10px; background:#f9fafb; padding:8px; border:1px solid #ccc; font-size: 10px;">
+        <div style="margin-top:10px; background:#f9fafb; padding:8px; border:1px solid #ccc; font-size: 10px; page-break-inside: avoid;">
             <div style="font-weight:bold; margin-bottom:4px;">NOTAS DE ENTREVISTA:</div>
-            ${data.perfil.notaProteccion ? `<div><strong>Protección:</strong> ${data.perfil.notaProteccion}</div>` : ""}
-            ${data.perfil.notaEducacion ? `<div><strong>Educación:</strong> ${data.perfil.notaEducacion}</div>` : ""}
-            ${data.perfil.notaAhorro ? `<div><strong>Ahorro:</strong> ${data.perfil.notaAhorro}</div>` : ""}
-            ${data.perfil.notaJubilacion ? `<div><strong>Jubilación:</strong> ${data.perfil.notaJubilacion}</div>` : ""}
-            ${data.perfil.notaSalud ? `<div><strong>Salud:</strong> ${data.perfil.notaSalud}</div>` : ""}
-            ${data.perfil.notaRiesgos ? `<div><strong>Riesgos:</strong> ${data.perfil.notaRiesgos}</div>` : ""}
+            ${data.perfil.notaProteccion ? `<div style="margin-bottom:2px; line-height: 1.3 !important;"><strong>Protección:</strong> ${data.perfil.notaProteccion}</div>` : ""}
+            ${data.perfil.notaEducacion ? `<div style="margin-bottom:2px; line-height: 1.3 !important;"><strong>Educación:</strong> ${data.perfil.notaEducacion}</div>` : ""}
+            ${data.perfil.notaAhorro ? `<div style="margin-bottom:2px; line-height: 1.3 !important;"><strong>Ahorro:</strong> ${data.perfil.notaAhorro}</div>` : ""}
+            ${data.perfil.notaJubilacion ? `<div style="margin-bottom:2px; line-height: 1.3 !important;"><strong>Jubilación:</strong> ${data.perfil.notaJubilacion}</div>` : ""}
+            ${data.perfil.notaSalud ? `<div style="margin-bottom:2px; line-height: 1.3 !important;"><strong>Salud:</strong> ${data.perfil.notaSalud}</div>` : ""}
+            ${data.perfil.notaRiesgos ? `<div style="margin-bottom:2px; line-height: 1.3 !important;"><strong>Riesgos:</strong> ${data.perfil.notaRiesgos}</div>` : ""}
         </div>
     `;
   }
 
   html += `
-        <h2>1. Planeación Educativa</h2>
+        <h2 style="background-color: #8cbe27; color: white; padding-bottom: 10px;">1. Planeación Educativa</h2>
         <table>
-            <thead><tr><th>Hijo</th><th>Edad</th><th>Faltan</th><th>Universidad</th><th align="right">Costo</th><th align="right">Ahorro Anual</th></tr></thead>
+            <thead><tr><th>Hijo</th><th>Edad</th><th>Faltan</th><th>Universidad</th><th style="text-align: right;">Costo</th><th style="text-align: right;">Ahorro Anual</th></tr></thead>
             <tbody>
-                ${data.hijos.map((h: any) => `<tr><td>${txt(h.nombre)}</td><td>${txt(h.edad)}</td><td>${h.yearsFaltantes}</td><td>${txt(h.universidad)}</td><td align="right">${money(h.costoProyectado)}</td><td align="right">${money(h.ahorroAnual)}</td></tr>`).join("")}
+                ${data.hijos.map((h: any) => `<tr><td>${txt(h.nombre)}</td><td>${txt(h.edad)}</td><td>${h.yearsFaltantes}</td><td>${txt(h.universidad)}</td><td style="text-align: right;">${money(h.costoProyectado)}</td><td style="text-align: right;">${money(h.ahorroAnual)}</td></tr>`).join("")}
             </tbody>
         </table>
         <div style="text-align:right; font-weight:bold; font-size:11px;">TOTAL AHORRO ANUAL EDUCACIÓN: ${money(data.totales.educacionAnual)}</div>
 
-        <h2>2. Proyección de Retiro (Inflación Proyectada: 4%)</h2>
+        <h2 style="background-color: #2665ad; color: white; padding-bottom: 10px;">2. Proyección de Retiro (Inflación Proyectada: 4%)</h2>
         <div class="grid">
             <div class="col">
                 <div class="row"><span class="label">Edad Actual:</span> <span class="value">${txt(data.jubilacion.edadActual)}</span></div>
@@ -249,12 +246,12 @@ export const generatePDF = async (data: any, type: "cliente" | "asesor") => {
             </div>
             <div class="col">
                 <div class="row"><span class="label">Capital (Valor Presente):</span> <span class="value" style="font-weight:bold">${money(data.totales.jubilacionCapital)}</span></div>
-                <div class="row" style="background:#e0f2fe;"><span class="label">Capital (Valor Futuro):</span> <span class="value" style="font-weight:bold;">${money(data.totales.jubilacionCapitalFuturo)}</span></div>
+                <div class="row"><span class="label">Capital (Valor Futuro):</span> <span class="value" style="font-weight:bold;">${money(data.totales.jubilacionCapitalFuturo)}</span></div>
                 <div class="row" style="margin-top:5px;"><span class="label">Ahorro Anual Sugerido:</span> <span class="value" style="font-weight:bold">${money(data.totales.jubilacionAhorroAnual)}</span></div>
             </div>
         </div>
 
-        <h2>3. Balance Financiero</h2>
+        <h2 style="background-color: #8cbe27; color: white; padding-bottom: 10px;">3. Balance Financiero</h2>
         <div class="grid">
             <div class="col">
                 <div class="sub-title">ACTIVOS</div>
@@ -278,16 +275,16 @@ export const generatePDF = async (data: any, type: "cliente" | "asesor") => {
         
         <div class="sub-title" style="margin-top:10px;">SEGUROS VIGENTES</div>
         <table>
-            <thead><tr><th>Tipo</th><th>Compañía</th><th>Plan</th><th align="right">Suma Aseg.</th><th align="right">Prima</th></tr></thead>
+            <thead><tr><th>Tipo</th><th>Compañía</th><th>Plan</th><th style="text-align: right;">Suma Aseg.</th><th style="text-align: right;">Prima</th></tr></thead>
             <tbody>
-                <tr><td>Individual</td><td>${txt(data.seguros.individual.compania)}</td><td>${txt(data.seguros.individual.plan)}</td><td align="right">${money(data.seguros.individual.sumaAsegurada)}</td><td align="right">${money(data.seguros.individual.prima)}</td></tr>
-                <tr><td>Colectivo</td><td>${txt(data.seguros.colectivo.compania)}</td><td>${txt(data.seguros.colectivo.plan)}</td><td align="right">${money(data.seguros.colectivo.sumaAsegurada)}</td><td align="right">${money(data.seguros.colectivo.prima)}</td></tr>
-                <tr><td>Otros</td><td>${txt(data.seguros.otros.compania)}</td><td>${txt(data.seguros.otros.plan)}</td><td align="right">${money(data.seguros.otros.sumaAsegurada)}</td><td align="right">${money(data.seguros.otros.prima)}</td></tr>
+                <tr><td>Individual</td><td>${txt(data.seguros.individual.compania)}</td><td>${txt(data.seguros.individual.plan)}</td><td style="text-align: right;">${money(data.seguros.individual.sumaAsegurada)}</td><td style="text-align: right;">${money(data.seguros.individual.prima)}</td></tr>
+                <tr><td>Colectivo</td><td>${txt(data.seguros.colectivo.compania)}</td><td>${txt(data.seguros.colectivo.plan)}</td><td style="text-align: right;">${money(data.seguros.colectivo.sumaAsegurada)}</td><td style="text-align: right;">${money(data.seguros.colectivo.prima)}</td></tr>
+                <tr><td>Otros</td><td>${txt(data.seguros.otros.compania)}</td><td>${txt(data.seguros.otros.plan)}</td><td style="text-align: right;">${money(data.seguros.otros.sumaAsegurada)}</td><td style="text-align: right;">${money(data.seguros.otros.prima)}</td></tr>
             </tbody>
         </table>
         <div style="text-align:right; font-weight:bold; font-size:11px;">TOTAL SUMA ASEGURADA: ${money(data.totales.totalSeguros)}</div>
 
-        <h2>4. Análisis de Flujo de Efectivo</h2>
+        <h2 style="background-color: #2665ad; color: white; padding-bottom: 10px;">4. Análisis de Flujo de Efectivo</h2>
         <div class="grid">
              <div class="col">
                 <div class="sub-title">INGRESOS MENSUALES</div>
@@ -321,13 +318,13 @@ export const generatePDF = async (data: any, type: "cliente" | "asesor") => {
         
         </div>
         
-        <div class="total-box" style="background:#e0f2fe;">CAPACIDAD DE AHORRO MENSUAL: ${money(capacidadAhorroReal)}</div>
+        <div class="total-box">CAPACIDAD DE AHORRO MENSUAL: ${money(capacidadAhorroReal)}</div>
 
-        <h2>5. Determinación de Necesidades de Protección</h2>
+        <h2 style="background-color: #8cbe27; color: white; padding-bottom: 10px;">5. Determinación de Necesidades de Protección</h2>
         <div class="row"><span class="label">Ingreso Mensual Familiar Actual:</span> <span class="value">${money(totalIngresosMensualesReal)}</span></div>
         <div class="row"><span class="label">(-) Ingreso del Cónyuge:</span> <span class="value">- ${money(data.ingresos.conyuge)}</span></div>
         <div class="row"><span class="label">(-) Otros Ingresos (Rentas, etc):</span> <span class="value">- ${money(data.detalle.otrosIngresos)}</span></div>
-        <div class="row" style="font-weight:bold; background:#f0f9ff;"><span class="label">(=) Ingreso Mensual a Recuperar:</span> <span class="value">${money(data.totales.ingresoMensualNecesario)}</span></div>
+        <div class="row" style="font-weight:bold;"><span class="label">(=) Ingreso Mensual a Recuperar:</span> <span class="value">${money(data.totales.ingresoMensualNecesario)}</span></div>
         <br/>
         <div class="row"><span class="label">Capital Necesario (Generador de Rentas al ${txt(data.detalle.tasaInteres)}%):</span> <span class="value">${money(data.totales.capitalNecesario)}</span></div>
         <div class="row"><span class="label">(+) Pasivos + Sepelio (${money(data.fallecimiento.gastosSepelio)}):</span> <span class="value">+ ${money(data.totales.gastosInmediatos)}</span></div>
@@ -336,7 +333,7 @@ export const generatePDF = async (data: any, type: "cliente" | "asesor") => {
         
         <div class="row"><span class="label">(-) Seguros Vigentes:</span> <span class="value">- ${money(data.totales.totalSeguros)}</span></div>
         
-        <div class="total-box" style="background:#fef08a;">
+        <div class="total-box">
             CAPITAL REAL DE PROTECCIÓN: ${money(deficitRealCorregido)}
         </div>
 
@@ -344,7 +341,7 @@ export const generatePDF = async (data: any, type: "cliente" | "asesor") => {
             <div style="font-weight:bold; margin-bottom:5px; text-transform:uppercase;">Análisis por Incapacidad Total</div>
             <div class="row"><span class="label">Pasivos Totales:</span> <span class="value">${money(data.totales.totalPasivos)}</span></div>
             <div class="row"><span class="label">Gastos Ajuste Vida:</span> <span class="value">${money(data.fallecimiento.gastosIncapacidad)}</span></div>
-            <div class="total-box" style="background:#ffedd5;">NECESIDAD TOTAL (INCAPACIDAD): ${money(data.totales.gastosIncapacidadTotal)}</div>
+            <div class="total-box">NECESIDAD TOTAL (INCAPACIDAD): ${money(data.totales.gastosIncapacidadTotal)}</div>
         </div>
 
         <div style="text-align:center; font-size:10px; margin-top:5px;">
@@ -352,7 +349,6 @@ export const generatePDF = async (data: any, type: "cliente" | "asesor") => {
         </div>
   `;
 
-  // --- SECCIÓN 7: ASESOR (ANEXO DE CIERRE) ---
   if (type === "asesor") {
     html += `
         <div style="margin-top:20px; border:2px dashed #999; padding:10px; page-break-inside:avoid; background-color: #fafafa;">
@@ -380,7 +376,7 @@ export const generatePDF = async (data: any, type: "cliente" | "asesor") => {
                         <th style="width:15%;">Entorno</th>
                         <th style="width:25%;">Nombre</th>
                         <th style="width:20%;">Ocupación</th>
-                        <th style="width:10%;">Edad</th>
+                        <th style="width:10%; text-align: center;">Edad</th>
                         <th style="width:15%;">G. Familiar</th>
                         <th style="width:15%;">Teléfono</th>
                     </tr>
@@ -416,6 +412,11 @@ export const generatePDF = async (data: any, type: "cliente" | "asesor") => {
   `;
 
   try {
+    const dateStr = new Date().toLocaleDateString("es-MX").replace(/\//g, "-");
+    const docTypeStr = type === "cliente" ? "Reporte para Cliente" : "Reporte Interno";
+    const rawFileName = `${data.nombreCliente || "Cliente"} ${dateStr} ${docTypeStr}.pdf`;
+    const safeFileName = rawFileName.replace(/[\/\\?%*:|"<>]/g, "-");
+
     if (Platform.OS === "web") {
       const html2pdf = require("html2pdf.js");
       const element = document.createElement("div");
@@ -425,7 +426,7 @@ export const generatePDF = async (data: any, type: "cliente" | "asesor") => {
       html2pdf()
         .set({
           margin: 10,
-          filename: 'reporte.pdf',
+          filename: safeFileName,
           image: { type: 'jpeg', quality: 0.98 },
           html2canvas: { scale: 2 },
           jsPDF: { unit: 'mm', format: 'letter', orientation: 'portrait' }
@@ -437,7 +438,15 @@ export const generatePDF = async (data: any, type: "cliente" | "asesor") => {
         });
     } else {
       const { uri } = await Print.printToFileAsync({ html });
-      await shareAsync(uri, { UTI: ".pdf", mimeType: "application/pdf" });
+      const baseDir = (FileSystem as any).cacheDirectory || (FileSystem as any).documentDirectory || "";
+      const newUri = `${baseDir}${safeFileName}`;
+
+      await FileSystem.moveAsync({
+        from: uri,
+        to: newUri
+      });
+
+      await shareAsync(newUri, { UTI: ".pdf", mimeType: "application/pdf", dialogTitle: safeFileName });
     }
   } catch (error) {
     console.error(error);

@@ -1,0 +1,376 @@
+global_specs:
+  scope: "/*"
+
+  constraints:
+    max_body_size: 5mb
+    max_header_size: 1mb
+    timeout:
+	  read: 5s
+	  read_headers: 5s
+	  write: 5s
+	  idle: 60s
+
+    on_request_limit_exceeded:
+      action: "Connection Termination"
+      description: "The server will forcefully close the TCP connection to prevent resource exhaustion."
+
+  # Standard responses for any endpoint
+  default_responses:
+    500:
+      contentType: text/plain
+      body: "Internal server error"
+      reason: "Unexpected server-side failure"
+
+    504:
+      contentType: text/plain
+      body: 504 Gateway Time-out
+      reason: "The server took too long to respond (AWS ALB limit)"
+
+global_post_specs:
+  scope: "POST /*"
+
+  # Standar requirements for any POST endpoint
+  request:
+    contentType: application/json
+
+  # Standard responses for any POST endpoint
+  response:
+    400:
+      - contentType: text/plain
+        body: Bad Request
+        reason: The HTTP request body is malformed or cannot be parsed
+
+	422:
+      - contentType: application/json
+        reason: |
+			The JSON is well-formed but cannot be processed. This includes invalid data types (e.g., sending an integer instead of a string)
+			or business validation failures (e.g., invalid email format, missing required fields).
+        body: { "errors": { "field_name": "error_slug" } }
+
+middlewares:
+  auth:
+    description: "Verifies user session using Authorization (Bearer <token>) header or (session) cookie."
+    on_failure:
+      status: 404
+      contentType: "text/html"
+
+  super_admin:
+    description: "Restricts access to users with the SuperAdmin role."
+    on_failure:
+      status: 404
+      contentType: "text/html"
+
+/api/signup:
+  request:
+    method: POST
+    body:
+      name:
+        required: true
+        min: 5
+        max: 255
+      email:
+        required: true
+        max: 255
+      password:
+        required: true
+        min: 8
+        max: 255
+      token:
+        required: conditional # Mandatory except during super admin initialization.
+        description: |
+          If not provided in the body, it must be sent as a URL query parameter
+          (e.g., /api/signup?setup_key=<value>) for super admin registration.
+
+  responses:
+    201:
+      - contentType: application/json
+        reason: User created successfully and invitation marked as used
+        body: { "status": "success" }
+
+    403:
+      - contentType: application/json
+        reason: The token hash does not match any active invitation or is already accepted/expired
+        body: {"error": "invalid_token"}
+
+      - contentType: application/json
+        reason: The provided email does not match the email associated with the token
+        body: {"error": "email_mismatch"}
+
+    422:
+      - contentType: application/json
+        reason: One or more fields failed format validation (email format, password length, etc)
+        body: { "errors": { "field_name": "error_slug" } }
+
+/api/login:
+  request:
+    method: POST
+    body:
+      email:
+        required: true
+      password:
+        required: true
+
+  responses:
+    200:
+      - contentType: application/json
+        reason: Credentials verified and session created
+        body: { "token": "string" }
+
+    401:
+      - contentType: application/json
+        reason: "The email doesn't exist or the password is incorrect"
+        body: { "error": "invalid_credentials" }
+
+    403:
+      - contentType: application/json
+        reason: "The user's access period (employment_period) has expired"
+        body: { "error": "employment_period_ended" }
+
+    422:
+      - contentType: application/json
+        reason: "Required fields are missing or empty"
+        body: { "error": "missing_required_fields" }
+
+/api/admin/user:
+  middlewares: [auth, super_admin]
+
+  request:
+    method: POST
+    body:
+      email:
+        required: true
+      role:
+        required: true
+        type: string
+        description: "Must match a valid system role (e.g., SuperAdmin, Admin, Advisor)"
+      leader:
+        required: false
+        type: string
+        description: "Email of an existing and active user"
+
+  responses:
+    201:
+      - contentType: application/json
+        reason: Invitation created successfully and token generated
+        body: { "token": "string" }
+
+    400:
+      - contentType: application/json
+        reason: The provided leader email does not exist
+        body: { "error": "invalid_leader" }
+
+    409:
+      - contentType: application/json
+        reason: An active invitation already exists for this email address
+        body: { "error": "invitation_already_sent" }
+
+    422:
+      - contentType: application/json
+        reason: Email format is invalid or the role does not exist in the system
+        body: { "errors": { "field_name": "error_slug" } }
+
+/api/forgot-password:
+  request:
+    method: POST
+    body:
+      email:
+        required: true
+        type: string
+        description: "The user's registered email address."
+
+  responses:
+    200:
+      - contentType: application/json
+        reason: |
+          Request received. To prevent email enumeration, this endpoint returns
+          a success message regardless of whether the email exists in the system or not.
+        body: { "status": "success" }
+
+/api/dashboard-global:
+  request:
+    method: GET
+    query:
+      preset:
+        required: true
+        type: string
+        description: "A predefined date range string. Allowed values: 'week', 'month', 'quarter', 'last_6_months', 'year', 'custom'."
+      start_date:
+        required: conditional
+        type: string
+        format: YYYY-MM-DD
+        description: "Custom start date for the dashboard data range. Only required and processed if preset is 'custom'. Must be on or after 2025-01-01 and not in the future."
+      end_date:
+        required: conditional
+        type: string
+        format: YYYY-MM-DD
+        description: "Custom end date for the dashboard data range. Only required and processed if preset is 'custom'. Must be on or after 2025-01-01, not in the future, and greater than or equal to start_date."
+
+  responses:
+    200:
+      - contentType: application/json
+        reason: "Returns global dashboard statistics, KPIs, and charts properly aggregated."
+        body:
+          kpis:
+            total_profiles:
+              type: integer
+              example: 100
+            closed:
+              type: integer
+              example: 40
+            in_process:
+              type: integer
+              example: 60
+            effectiveness:
+              type: float
+              example: 40.0
+            total_referrals:
+              type: integer
+              example: 20
+            productivity:
+              type: float
+              example: 10.0
+            referrals_per_closed:
+              type: float
+              example: 0.5
+          timeline_array:
+            type: array
+            items:
+              date:
+                type: string
+                description: "Format depends on date range duration (e.g. '02 Jan' for <= 31 days or 'Jan 2006' for > 31 days)"
+                example: "01 Jan"
+              created:
+                type: integer
+                example: 10
+              closed:
+                type: integer
+                example: 4
+          chart_data_pie:
+            type: array
+            items:
+              name:
+                type: string
+                example: "Closed"
+              value:
+                type: integer
+                example: 40
+          top_generated:
+            type: array
+            items:
+              name:
+                type: string
+                example: "Advisor 1"
+              generated:
+                type: integer
+                example: 30
+          top_closed:
+            type: array
+            items:
+              name:
+                type: string
+                example: "Advisor 1"
+              closed:
+                type: integer
+                example: 15
+          top_referrals:
+            type: array
+            items:
+              name:
+                type: string
+                example: "Advisor 1"
+              referrals:
+                type: integer
+                example: 5
+    400:
+      - contentType: application/json
+        reason: "Invalid date presets or error parsing custom start/end dates. Returns an empty/zeroed structure to prevent UI crashes."
+        body:
+          kpis:
+            total_profiles:
+              type: integer
+              example: 0
+            closed:
+              type: integer
+              example: 0
+            in_process:
+              type: integer
+              example: 0
+            effectiveness:
+              type: float
+              example: 0.0
+            total_referrals:
+              type: integer
+              example: 0
+            productivity:
+              type: float
+              example: 0.0
+            referrals_per_closed:
+              type: float
+              example: 0.0
+          timeline_array: null
+          chart_data_pie: null
+          top_generated: null
+          top_closed: null
+          top_referrals: null
+
+/api/profiles/new:
+  middlewares: [auth]
+  request:
+    method: POST
+    body:
+      clients:
+        type: array
+        description: "A list of client objects to be created. Minimum of 1 client."
+        items:
+          name:
+            required: true
+            type: string
+            description: "The name of the client. Must be between 1 and 100 characters."
+            example: "Juan Pérez"
+          created_at:
+            required: false
+            type: string
+            format: date-time
+            description: "Timestampt of creation (if not provided, it will be mapped correctly at insertion to server's time)."
+            example: "2026-03-10T15:00:00Z"
+          is_closed:
+            required: false
+            type: boolean
+            description: "Whether the profile was closed."
+            example: false
+          acquisition_status:
+            required: true
+            type: string
+            description: "Current status of the profile acquisition. Must be one of: 'pending', 'cancelled', 'completed'."
+            example: "pending"
+          closing_types:
+            required: false
+            type: array
+            items:
+              type: string
+            description: "Types of policies or plans closed for this client."
+          data:
+            required: false
+            type: object
+            description: "Detailed client data payload including Profile, Referrals, Assets, Insurance, etc. Stored encrypted in the database."
+            example: { "profile": {}, "referrals": [] }
+
+  responses:
+    201:
+      - contentType: application/json
+        reason: "Client profiles created successfully."
+        body:
+          data:
+            type: array
+            description: "Returns an array containing the UUIDs generated for the newly inserted clients."
+            items:
+              type: string
+              format: uuid
+              example: "123e4567-e89b-12d3-a456-426614174000"
+    422:
+      - contentType: application/json
+        reason: "Validation error. Client name is missing, name exceeds 100 characters, classification exceeds 50 characters, or acquisition status is not within the valid enum."
+        body:
+          errors:
+            "clients[0].name": "required|too_long"
+            "clients[0].acquisition_status": "invalid"

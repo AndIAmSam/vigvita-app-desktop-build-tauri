@@ -28,7 +28,7 @@ export default function TableroCopiaScreen() {
     const {
         advisor, logout, showAlert,
         nombreCliente, guardarProspecto, listaClientes, cargarProspecto, borrarCliente, nuevoAnalisis, actualizarEstadoProspecto,
-        importarRespaldo
+        importarRespaldo, forceSync
     } = useFinancialData();
 
     const [searchText, setSearchText] = useState("");
@@ -62,6 +62,29 @@ export default function TableroCopiaScreen() {
             Animated.spring(slideAnim, { toValue: 0, friction: 6, useNativeDriver: Platform.OS !== 'web' })
         ]).start();
     }, []);
+
+    // --- CHECK TESTER ROLE (WHITELIST) ---
+    const isTester = useMemo(() => {
+        if (!advisor) return false;
+        const emailBase = advisor.email?.toLowerCase().trim() || "";
+        const nameBase = advisor.nombre?.toLowerCase().trim() || "";
+
+        const validEmails = [
+            "gustavo.nava@vigvita.com.mx",
+            "carlosnavarros1016@gmail.com",
+            "c.castillo.wb@gmail.com",
+            "asistenteherschel1@gmail.com"
+        ];
+
+        const validNames = [
+            "gustavo a nava",
+            "carlos daniel navarro silva",
+            "cristian ivan castillo palma",
+            "herschel esquivel"
+        ];
+
+        return validEmails.includes(emailBase) || validNames.includes(nameBase);
+    }, [advisor]);
 
     // --- FILTRADO INTELIGENTE (LA CLAVE DEL REQUERIMIENTO) ---
     const filteredClients = useMemo(() => {
@@ -275,27 +298,35 @@ export default function TableroCopiaScreen() {
                 <Animated.View style={{ opacity: fadeAnim, transform: [{ translateY: slideAnim }], width: '100%', alignItems: 'center' }}>
 
                     {/* BANNER DEMO */}
-                    <View style={styles.demoBanner}>
-                        <FontAwesome name="warning" size={16} color="#9a3412" style={{ marginRight: 8 }} />
-                        <Text style={styles.demoBannerText}>
-                            VERSIÓN DEMO: Los datos guardados son estrictamente locales. La aplicación y sus funcionalidades pueden estar sujetas a cambios, presentar inconstancias o comportamientos inesperados. La experiencia final puede variar.
-                        </Text>
-                    </View>
 
-                    <View style={styles.header}>
-                        <View style={styles.headerLeft}>
-                            <View style={styles.avatarContainer}>
-                                <FontAwesome name="user-circle" size={42} color={COLORS.azul1} />
+                    <View style={styles.headerContainer}>
+                        {/* Fila Top: Logos Centrados Matemáticamente */}
+                        <View style={styles.headerTopRow}>
+                            <View style={styles.leftLogoContainer}>
+                                <Image source={require('../../assets/logo.png')} style={styles.headerLogo} resizeMode="contain" />
                             </View>
-                            <View>
-                                <Text style={styles.welcomeLabel}>PANEL DE ASESOR</Text>
-                                <Text style={styles.userNameText}>{advisor?.nombre || 'Usuario'}</Text>
+                            <View style={styles.logoDivider} />
+                            <View style={styles.rightLogoContainer}>
+                                <Image source={require('../../assets/vigvision-logo.png')} style={styles.headerLogoSecondary} resizeMode="contain" />
                             </View>
                         </View>
-                        <View style={styles.headerRight}>
-                            <Image source={require('../../assets/logo.png')} style={styles.headerLogo} resizeMode="contain" />
-                            <TouchableOpacity onPress={handleLogout} style={styles.logoutBtn}>
-                                <FontAwesome name="sign-out" size={22} color={COLORS.rojoTexto} />
+
+                        {/* Fila Bottom: Bienvenida y Avatar */}
+                        <View style={styles.headerGreeting}>
+                            <View style={styles.avatarContainer}>
+                                <View style={styles.avatarCircle}>
+                                    <FontAwesome name="user" size={32} color={COLORS.azul1} />
+                                </View>
+                            </View>
+                            <View style={{ flex: 1, marginRight: 10 }}>
+                                <Text style={styles.welcomeLabel}>PANEL DE ASESOR</Text>
+                                <Text style={styles.userNameText} numberOfLines={1}>
+                                    ¡Hola, {advisor?.nombre ? advisor.nombre.split(' ')[0].charAt(0).toUpperCase() + advisor.nombre.split(' ')[0].slice(1).toLowerCase() : 'Usuario'}!
+                                </Text>
+                            </View>
+                            <TouchableOpacity onPress={handleLogout} style={styles.logoutBtn} activeOpacity={0.7}>
+                                <FontAwesome name="sign-out" size={16} color={COLORS.rojoTexto} />
+                                <Text style={styles.logoutText}>Salir</Text>
                             </TouchableOpacity>
                         </View>
                     </View>
@@ -311,7 +342,7 @@ export default function TableroCopiaScreen() {
                         <FontAwesome name="desktop" size={20} color={COLORS.textoGris} />
                     </View>
                     <View style={styles.clientDisplay}>
-                        <Text style={styles.clientLabel}>CLIENTE EN PANTALLA</Text>
+                        <Text style={styles.clientLabel}>CLIENTE ACTUAL</Text>
                         {nombreCliente ? <Text style={styles.clientNameBig}>{nombreCliente}</Text> : <Text style={styles.clientNamePlaceholder}>-- Vacío --</Text>}
                     </View>
                     <View style={styles.actionButtonsRow}>
@@ -348,14 +379,22 @@ export default function TableroCopiaScreen() {
                                     <TextInput style={styles.searchInput} placeholder="Buscar..." placeholderTextColor="#9ca3af" value={searchText} onChangeText={setSearchText} />
                                     {searchText.length > 0 && <TouchableOpacity onPress={() => setSearchText("")}><FontAwesome name="times-circle" size={16} color="#9ca3af" style={{ marginRight: 10 }} /></TouchableOpacity>}
                                 </View>
-                                <TouchableOpacity style={[styles.exportBtn, { marginLeft: 10 }]} onPress={handleExportBackup}>
-                                    <FontAwesome name="download" size={14} color="#fff" />
-                                    <Text style={styles.exportBtnText}>Respaldo</Text>
-                                </TouchableOpacity>
-                                <TouchableOpacity style={[styles.exportBtn, { backgroundColor: COLORS.verde, marginLeft: 10 }]} onPress={handleImportBackup}>
-                                    <FontAwesome name="upload" size={14} color="#fff" />
-                                    <Text style={styles.exportBtnText}>Cargar</Text>
-                                </TouchableOpacity>
+                                {/* <TouchableOpacity style={[styles.exportBtn, { marginLeft: 10, backgroundColor: COLORS.azul2 }]} onPress={forceSync}>
+                                    <FontAwesome name="refresh" size={14} color="#fff" />
+                                    <Text style={styles.exportBtnText}>Sincronizar</Text>
+                                </TouchableOpacity> */}
+                                {isTester && (
+                                    <>
+                                        <TouchableOpacity style={[styles.exportBtn, { marginLeft: 10 }]} onPress={handleExportBackup}>
+                                            <FontAwesome name="download" size={14} color="#fff" />
+                                            <Text style={styles.exportBtnText}>Respaldo</Text>
+                                        </TouchableOpacity>
+                                        <TouchableOpacity style={[styles.exportBtn, { backgroundColor: COLORS.verde, marginLeft: 10 }]} onPress={handleImportBackup}>
+                                            <FontAwesome name="upload" size={14} color="#fff" />
+                                            <Text style={styles.exportBtnText}>Cargar</Text>
+                                        </TouchableOpacity>
+                                    </>
+                                )}
                             </View>
 
                             {currentItems.length === 0 && (
@@ -580,6 +619,11 @@ const AnimatedClientRow = ({ cliente, index, onLoad, onDelete, onAbrirModalEstad
             </View>
 
             <View style={styles.rowRight}>
+                {/* Indicador de Sincronización */}
+                <View style={[styles.iconBtn, { backgroundColor: cliente.sincronizado ? '#dbeafe' : '#fef3c7' }]}>
+                    <FontAwesome name="cloud" size={14} color={cliente.sincronizado ? COLORS.nubeSync : COLORS.nubePending} />
+                </View>
+
                 {/* Botón de Estado en lugar de Switch */}
                 <TouchableOpacity onPress={() => onAbrirModalEstado(cliente)} style={[styles.estadoPillBtn, { borderColor: iconBgColor }]} activeOpacity={0.7}>
                     <View style={[styles.estadoPillDot, { backgroundColor: iconBgColor }]} />
@@ -680,14 +724,20 @@ const styles = StyleSheet.create({
     demoBanner: { flexDirection: 'row', backgroundColor: '#ffedd5', padding: 12, borderRadius: 10, width: '100%', maxWidth: 600, marginBottom: 15, alignItems: 'center', borderWidth: 1, borderColor: '#fdba74' },
     demoBannerText: { fontSize: 11, color: '#9a3412', fontWeight: 'bold', flex: 1, lineHeight: 16 },
 
-    header: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: 20, width: '100%', maxWidth: 600, paddingHorizontal: 5 },
-    headerLeft: { flexDirection: 'row', alignItems: 'center', flex: 1 },
-    headerRight: { flexDirection: 'row', alignItems: 'center', gap: 15 },
-    avatarContainer: { marginRight: 12 },
-    welcomeLabel: { fontSize: 10, fontWeight: 'bold', color: COLORS.azul2, letterSpacing: 1, marginBottom: 2 },
-    userNameText: { fontSize: 20, fontWeight: '800', color: COLORS.negro },
-    headerLogo: { width: 80, height: 80 },
-    logoutBtn: { padding: 8, backgroundColor: '#fff0f0', borderRadius: 10 },
+    headerContainer: { width: '100%', maxWidth: 600, paddingHorizontal: 5, marginBottom: 25 },
+    headerTopRow: { flexDirection: 'row', width: '100%', alignItems: 'center', marginBottom: 25 },
+    leftLogoContainer: { flex: 1, alignItems: 'flex-end', paddingRight: 10 },
+    rightLogoContainer: { flex: 1, alignItems: 'flex-start', paddingLeft: 10 },
+    headerLogo: { width: 150, height: 60 },
+    logoDivider: { width: 1, height: 65, backgroundColor: '#d1d5db' },
+    headerLogoSecondary: { width: 100, height: 100 },
+    logoutBtn: { flexDirection: 'row', alignItems: 'center', paddingVertical: 10, paddingHorizontal: 16, backgroundColor: '#fff0f0', borderRadius: 14, borderWidth: 1, borderColor: '#ffe4e6' },
+    logoutText: { color: COLORS.rojoTexto, fontWeight: 'bold', fontSize: 13, marginLeft: 8 },
+    headerGreeting: { flexDirection: 'row', alignItems: 'center' },
+    avatarContainer: { marginRight: 16 },
+    avatarCircle: { width: 56, height: 56, borderRadius: 28, backgroundColor: '#e0f2fe', justifyContent: 'center', alignItems: 'center', borderWidth: 2, borderColor: COLORS.blanco, shadowColor: COLORS.azul1, shadowOffset: { width: 0, height: 4 }, shadowOpacity: 0.15, shadowRadius: 8, elevation: 4 },
+    welcomeLabel: { fontSize: 10, fontWeight: '800', color: COLORS.textoGris, letterSpacing: 1.5, marginBottom: 4 },
+    userNameText: { fontSize: 26, fontWeight: '900', color: COLORS.negro, letterSpacing: -0.5 },
 
     cardSession: { width: '100%', maxWidth: 600, backgroundColor: COLORS.blanco, borderRadius: 24, padding: 25, shadowColor: "#000", shadowOffset: { width: 0, height: 10 }, shadowOpacity: 0.1, shadowRadius: 20, elevation: 5, borderWidth: 1, borderColor: 'rgba(0,0,0,0.02)' },
     sessionHeader: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: 20 },

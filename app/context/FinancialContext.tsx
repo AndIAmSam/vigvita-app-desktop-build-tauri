@@ -6,7 +6,7 @@ import React, {
   useEffect,
 } from "react";
 import { Modal, View, Text, TouchableOpacity, StyleSheet } from "react-native";
-import AsyncStorage from "@react-native-async-storage/async-storage";
+import localforage from "localforage";
 import { LISTA_UNIVERSIDADES } from "../constants/UniversityData";
 
 // ==========================================
@@ -162,6 +162,7 @@ export interface PerfilData {
 // Estructura de la Base de Datos Local
 export interface ClienteGuardado {
   id: string;
+  serverId?: string; // UUID devuelto por el servidor para re-ediciones (API v3)
   nombre: string;
   fechaCreacion: string;
   // NUEVO CAMPO: Estatus de venta (retro-compatible con old estatusCierre)
@@ -439,7 +440,7 @@ export const FinancialProvider = ({ children }: { children: ReactNode }) => {
     const init = async () => {
       try {
         // 1. Cargar Sesión
-        const storedAdvisor = await AsyncStorage.getItem("advisor_session");
+        const storedAdvisor = await localforage.getItem<string>("advisor_session");
         if (storedAdvisor) {
           const parsed = JSON.parse(storedAdvisor);
           setAdvisor(parsed);
@@ -447,7 +448,7 @@ export const FinancialProvider = ({ children }: { children: ReactNode }) => {
         }
 
         // 2. Cargar DB Local
-        const storedDB = await AsyncStorage.getItem("clientes_db");
+        const storedDB = await localforage.getItem<string>("clientes_db");
         if (storedDB) setListaClientes(JSON.parse(storedDB));
       } catch (e) {
         console.error("Error init", e);
@@ -532,10 +533,9 @@ export const FinancialProvider = ({ children }: { children: ReactNode }) => {
       spouse_hobbies: data.perfil?.conyugeHobbies || "",
       spouse_sport: data.perfil?.conyugeDeporte || "",
       dependents: (data.perfil?.dependientes || []).map((d: any) => ({
-        id: d.id,
-        name: d.nombre,
+        name: d.nombre || "",
         age: parseNum(d.edad),
-        relationship: d.parentesco,
+        relationship: d.parentesco || "",
         notes: d.notas || "",
       })),
       note_protection: data.perfil?.notaProteccion || "",
@@ -546,10 +546,9 @@ export const FinancialProvider = ({ children }: { children: ReactNode }) => {
       note_risks: data.perfil?.notaRiesgos || "",
     },
     children: (data.hijos || []).map((h: any) => ({
-      id: h.id,
-      name: h.nombre,
+      name: h.nombre || "",
       age: parseNum(h.edad),
-      university: h.universidad,
+      university: h.universidad || "",
       years_remaining: parseNum(h.yearsFaltantes),
       projected_cost: parseNum(h.costoProyectado),
       annual_savings: parseNum(h.ahorroAnual),
@@ -621,12 +620,11 @@ export const FinancialProvider = ({ children }: { children: ReactNode }) => {
       decision_maker_name: data.cita?.nombreDecisionMaker || "",
     },
     referrals: (data.referidos || []).map((r: any) => ({
-      id: r.id,
-      name: r.nombre,
+      name: r.nombre || "",
       age: parseNum(r.edad),
       marital_status: r.estadoCivil || "",
-      occupation: r.ocupacion,
-      phone: r.telefono,
+      occupation: r.ocupacion || "",
+      phone: r.telefono || "",
       circle: r.entorno || "",
       family_group: r.grupoFamiliar || "",
     })),
@@ -772,13 +770,19 @@ export const FinancialProvider = ({ children }: { children: ReactNode }) => {
   });
 
   // --- SYNC COMO JSON PURO ---
-  const forceSync = async (): Promise<string> => {
-    if (!isOnline) return "ERROR: No hay internet. Los datos siguen locales.";
+  const forceSync = async (overrideList?: ClienteGuardado[]): Promise<string> => {
+    if (!isOnline) {
+      showAlert("Sin conexión. Los datos se guardarán localmente.");
+      return "ERROR: No hay internet. Los datos siguen locales.";
+    }
 
     setSyncStatus("syncing");
 
+    // Usa la lista forzada (si se acaba de guardar algo) o el state actual
+    const baseList = overrideList || listaClientes;
+
     // 1. Filtrar solo los pendientes (DELTAS)
-    const clientesPendientes = listaClientes.filter((c) => !c.sincronizado);
+    const clientesPendientes = baseList.filter((c) => !c.sincronizado);
 
     // Si no hay nada que subir, terminamos
     if (clientesPendientes.length === 0) {
@@ -786,107 +790,126 @@ export const FinancialProvider = ({ children }: { children: ReactNode }) => {
       return "✅ Todo está al día. No hay datos pendientes de envío.";
     }
 
-    // 2. Construir el payload JSON con campos en INGLÉS (sin cálculos)
+    // 2. Construir el payload JSON con campos estrictos basados en api.yaml
     const payload = {
-      sync_timestamp: new Date().toISOString(),
-      // El backend identificará al asesor mediante el token Bearer en el header,
-      // por lo que ya no es necesario enviar sus datos (nombre, correo) en el body.
-      clients: clientesPendientes.map((cliente) => ({
-        local_id: cliente.id,
-        name: cliente.nombre,
-        created_at: cliente.fechaCreacion,
-        is_closed:
-          cliente.estatusAdquisicion === "cierre" || cliente.estatusCierre, // Lógica combinada legacy/nueva
-        acquisition_status:
-          cliente.estatusAdquisicion ||
-          (cliente.estatusCierre ? "cierre" : "en_espera"), // Backward compatibility export
-        closing_types:
-          cliente.tiposCierre ||
-          (cliente.tipoCierre ? [cliente.tipoCierre] : []),
-        data: mapClientData(cliente.data),
-      })),
+      clients: clientesPendientes.map((cliente) => {
+        let localStatus = cliente.estatusAdquisicion || (cliente.estatusCierre ? "cierre" : "en_espera");
+        let acqStatus = "pending";
+        // Map local status to strict API enum
+        if (localStatus === "en_espera") acqStatus = "pending";
+        if (localStatus === "descartado") acqStatus = "cancelled";
+        if (localStatus === "cierre") acqStatus = "completed";
+
+        const isClosed = acqStatus === "completed" || cliente.estatusCierre === true;
+
+        const payloadClient: any = {
+          name: cliente.nombre.substring(0, 100), // Max 100 chars as per API
+          is_closed: isClosed,
+          acquisition_status: acqStatus,
+          closing_types: cliente.tiposCierre || (cliente.tipoCierre ? [cliente.tipoCierre] : []),
+          data: mapClientData(cliente.data)
+        };
+
+        if (cliente.serverId) {
+          payloadClient.id = cliente.serverId;
+        }
+
+        return payloadClient;
+      }),
     };
 
-    // 3. Simulación de Envío a Servidor (en producción sería un fetch real)
-    return new Promise((resolve) => {
-      setTimeout(async () => {
-        // EJEMPLO DE CÓMO SE ENVIARÍA EN PRODUCCIÓN:
-        // const response = await fetch('https://tu-api.com/sync', {
-        //     method: 'POST',
-        //     headers: {
-        //         'Content-Type': 'application/json',
-        //         'Authorization': `Bearer ${advisor?.token}`
-        //     },
-        //     body: JSON.stringify(payload)
-        // });
+    // 3. Envío al Servidor (API REAL)
+    try {
+      const API_BASE_URL = process.env.EXPO_PUBLIC_API_URL || "https://vigvita.com.mx";
+      const targetUrl = `${API_BASE_URL}/api/profiles/new`;
 
-        // ÉXITO: Marcamos los locales como sincronizados
-        const idsSincronizados = clientesPendientes.map((c) => c.id);
+      console.log(`[SYNC-V3] Iniciando petición POST a: ${targetUrl}`);
+      console.log(`[SYNC-V3] Payload exacto enviado:`, JSON.stringify(payload, null, 2));
 
-        const listaActualizada = listaClientes.map((c) => {
-          if (idsSincronizados.includes(c.id)) {
-            return { ...c, sincronizado: true };
-          }
-          return c;
+      const response = await fetch(targetUrl, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'Authorization': `Bearer ${advisor?.token || ''}`
+        },
+        body: JSON.stringify(payload)
+      });
+
+      console.log(`[SYNC-V3] Respuesta del servidor - Status: ${response.status}`);
+
+      if (response.status === 201) {
+        // ÉXITO: Parsear respuesta para obtener UUIDs
+        let returnedUuids: string[] = [];
+        try {
+            const resJson = await response.json();
+            returnedUuids = resJson.data || [];
+        } catch (err) {
+            console.log("No se pudo parsear response de v3 o devolvió vacio. Errores posibles.");
+        }
+
+        setListaClientes((prev) => {
+          const listaActualizada = prev.map((c) => {
+            const syncIndex = clientesPendientes.findIndex(pend => pend.id === c.id);
+            if (syncIndex !== -1) {
+              // El cliente estaba pendiente y se mandó
+              const serverUuid = returnedUuids[syncIndex];
+              return { 
+                  ...c, 
+                  sincronizado: true,
+                  serverId: serverUuid || c.serverId // Preservamos si ya tenía o cargamos el nuevo
+              };
+            }
+            return c;
+          });
+
+          // Persistimos dentro del updater de estado para asegurar la fuente de la verdad
+          localforage.setItem("clientes_db", JSON.stringify(listaActualizada)).catch(console.error);
+          return listaActualizada;
         });
-
-        setListaClientes(listaActualizada);
-        await AsyncStorage.setItem(
-          "clientes_db",
-          JSON.stringify(listaActualizada),
-        );
 
         setSyncStatus("synced");
         setLastSyncTime(new Date().toLocaleTimeString());
-
-        // Visualización de lo que se envió
-        const debugPreview = {
-          METHOD: "POST (application/json)",
-          TOTAL_CLIENTS: clientesPendientes.length,
-          FULL_PAYLOAD: payload,
-        };
-
-        resolve(JSON.stringify(debugPreview, null, 2));
-      }, 1500);
-    });
+        
+        return "Sincronización exitosa con el servidor.";
+      } else {
+        // Fallo al crear en servidor
+        const errText = await response.text();
+        console.error("Error from API:", response.status, errText);
+        console.log("PAYLOAD SENT:", JSON.stringify(payload, null, 2));
+        setSyncStatus("pending");
+        showAlert(`Error ${response.status}: ${errText.substring(0, 100)}... Revisa la consola para más detalles.`);
+        return "ERROR: Fallo al crear perfiles en el servidor.";
+      }
+    } catch (error) {
+      console.error("Error al sincronizar:", error);
+      setSyncStatus("pending");
+      showAlert("Error de red al intentar sincronizar.");
+      return "ERROR: Excepción durante la sincronización.";
+    }
   };
 
   const toggleOnlineSimulation = () => {
     setIsOnline((prev) => !prev);
   };
 
-  // CONSTANTE DE SEGURIDAD (7 DÍAS EN MILISEGUNDOS)
-  const SESSION_DURATION = 7 * 24 * 60 * 60 * 1000;
 
   // INIT (MODIFICADO PARA VERIFICAR CADUCIDAD)
   useEffect(() => {
     const init = async () => {
       try {
         // 1. Cargar Sesión
-        const storedSession = await AsyncStorage.getItem("advisor_session");
+        const storedSession = await localforage.getItem<string>("advisor_session");
 
         if (storedSession) {
           const parsedSession = JSON.parse(storedSession);
-          const now = Date.now();
-          const loginTime = parsedSession.loginTime || 0;
 
-          // VERIFICAR SI LA SESIÓN SIGUE VIGENTE
-          if (now - loginTime < SESSION_DURATION) {
-            // Sesión válida
-            setAdvisor(parsedSession.user);
-            setUserName(parsedSession.user.nombre);
-          } else {
-            // Sesión caducada -> Borramos todo
-            console.log("Sesión expirada por seguridad.");
-            await AsyncStorage.removeItem("advisor_session");
-            setAdvisor(null);
-            // Opcional: Alertar al usuario
-            showAlert("Tu sesión ha expirado por seguridad.");
-          }
+          // La sesión ahora es permanente
+          setAdvisor(parsedSession.user);
+          setUserName(parsedSession.user.nombre);
         }
 
         // 2. Cargar DB Local (Igual que antes)
-        const storedDB = await AsyncStorage.getItem("clientes_db");
+        const storedDB = await localforage.getItem<string>("clientes_db");
         if (storedDB) setListaClientes(JSON.parse(storedDB));
       } catch (e) {
         console.error("Error init", e);
@@ -931,7 +954,7 @@ export const FinancialProvider = ({ children }: { children: ReactNode }) => {
 
         setAdvisor(user);
         setUserName(user.nombre);
-        await AsyncStorage.setItem(
+        await localforage.setItem(
           "advisor_session",
           JSON.stringify(sessionData),
         );
@@ -964,7 +987,7 @@ export const FinancialProvider = ({ children }: { children: ReactNode }) => {
 
   const logout = async () => {
     setAdvisor(null);
-    await AsyncStorage.removeItem("advisor_session");
+    await localforage.removeItem("advisor_session");
     // No borramos la DB local, solo la sesión
   };
 
@@ -1124,6 +1147,11 @@ export const FinancialProvider = ({ children }: { children: ReactNode }) => {
         nuevoClienteObj.tiposCierre =
           nuevaLista[index].tiposCierre ||
           (nuevaLista[index].tipoCierre ? [nuevaLista[index].tipoCierre] : []);
+
+        // Preservar metadatos vitales para evitar duplicados en V3 y reseteo de fechas
+        nuevoClienteObj.serverId = nuevaLista[index].serverId;
+        nuevoClienteObj.fechaCreacion = nuevaLista[index].fechaCreacion;
+
         nuevaLista[index] = nuevoClienteObj;
       } else {
         nuevaLista.push(nuevoClienteObj);
@@ -1135,9 +1163,12 @@ export const FinancialProvider = ({ children }: { children: ReactNode }) => {
     }
 
     setListaClientes(nuevaLista);
-    await AsyncStorage.setItem("clientes_db", JSON.stringify(nuevaLista));
+    await localforage.setItem("clientes_db", JSON.stringify(nuevaLista));
     setSyncStatus("pending"); // Activa alerta visual
-    showAlert("Guardado localmente. Se subirá cuando haya conexión.");
+    showAlert("Prospecto guardado exitosamente.");
+    
+    // Disparar sincronización automática pasando el contexto actualizado para evitar carrera
+    forceSync(nuevaLista);
   };
 
   const toggleCierreProspecto = async (
@@ -1163,7 +1194,7 @@ export const FinancialProvider = ({ children }: { children: ReactNode }) => {
       return c;
     });
     setListaClientes(nuevaLista);
-    await AsyncStorage.setItem("clientes_db", JSON.stringify(nuevaLista));
+    await localforage.setItem("clientes_db", JSON.stringify(nuevaLista));
   };
 
   const actualizarEstadoProspecto = async (
@@ -1186,7 +1217,7 @@ export const FinancialProvider = ({ children }: { children: ReactNode }) => {
       return c;
     });
     setListaClientes(nuevaLista);
-    await AsyncStorage.setItem("clientes_db", JSON.stringify(nuevaLista));
+    await localforage.setItem("clientes_db", JSON.stringify(nuevaLista));
   };
 
   const cargarProspecto = (cliente: ClienteGuardado) => {
@@ -1214,7 +1245,7 @@ export const FinancialProvider = ({ children }: { children: ReactNode }) => {
   const borrarCliente = async (id: string) => {
     const nuevaLista = listaClientes.filter((c) => c.id !== id);
     setListaClientes(nuevaLista);
-    await AsyncStorage.setItem("clientes_db", JSON.stringify(nuevaLista));
+    await localforage.setItem("clientes_db", JSON.stringify(nuevaLista));
     if (currentClientId === id) {
       nuevoAnalisis(true); // Pasar flag para no mostrar la de "listo para nuevo prospecto"
     }
@@ -1242,8 +1273,11 @@ export const FinancialProvider = ({ children }: { children: ReactNode }) => {
     setNotas("");
     setPiramideLevels(INITIAL_PIRAMIDE_LEVELS);
     if (!silencioso) {
-      showAlert("Listo para nuevo prospecto.");
+      showAlert("Listo para nuevo prospecto. Sincronizando...");
     }
+    
+    // Auto-sync
+    forceSync();
   };
 
   // --- RESPALDO (NUEVO) ---
@@ -1289,7 +1323,7 @@ export const FinancialProvider = ({ children }: { children: ReactNode }) => {
       }
 
       setListaClientes(nuevaLista);
-      await AsyncStorage.setItem("clientes_db", JSON.stringify(nuevaLista));
+      await localforage.setItem("clientes_db", JSON.stringify(nuevaLista));
 
       // Si hay conexión y tenemos cosas pendientes que suban (dependiendo de si se importó con local=false)
       setSyncStatus("pending");

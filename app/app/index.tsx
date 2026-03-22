@@ -1,16 +1,15 @@
 import React, { useState, useEffect, useRef } from 'react';
 import {
     View, Text, TextInput, TouchableOpacity, StyleSheet,
-    KeyboardAvoidingView, Platform, Animated, Image, Dimensions, Alert
+    KeyboardAvoidingView, Platform, Animated, Image, Dimensions
 } from 'react-native';
 import { useRouter } from 'expo-router';
 import { FontAwesome } from '@expo/vector-icons';
 import { useFinancialData } from '../context/FinancialContext';
-import { check } from '@tauri-apps/plugin-updater';
-import { relaunch } from '@tauri-apps/plugin-process';
 
 import { MovingBackground } from '../components/MovingBackground';
 import { BlurView } from 'expo-blur';
+
 
 const { height } = Dimensions.get('window');
 
@@ -27,40 +26,6 @@ const COLORS = {
 export default function LoginScreen() {
     const router = useRouter();
     const { login, isAuthenticated } = useFinancialData();
-    const [updateAvailable, setUpdateAvailable] = useState<string | null>(null);
-    const [isUpdating, setIsUpdating] = useState(false);
-
-    // Auto-Updater Script (Sólo en web exportado a Tauri)
-    useEffect(() => {
-        if (Platform.OS === 'web') {
-            const checkForUpdates = async () => {
-                try {
-                    const update = await check();
-                    if (update?.available) {
-                        setUpdateAvailable(update.version);
-                        Alert.alert(
-                            "Actualización Disponible",
-                            `La versión ${update.version} está lista para descargar. ¿Actualizar ahora?`,
-                            [
-                                { text: "Más tarde", style: "cancel" },
-                                {
-                                    text: "Descargar e Instalar",
-                                    onPress: async () => {
-                                        setIsUpdating(true);
-                                        await update.downloadAndInstall();
-                                        await relaunch();
-                                    }
-                                }
-                            ]
-                        );
-                    }
-                } catch (error) {
-                    console.log("No se pudo verificar actualizaciones:", error);
-                }
-            };
-            checkForUpdates();
-        }
-    }, []);
 
     // Si ya está autenticado (y la sesión es válida), redirigir
     useEffect(() => {
@@ -217,7 +182,7 @@ export default function LoginScreen() {
                                     style={styles.secondaryLogo}
                                     resizeMode="contain"
                                 />
-                                <Text style={styles.versionText}>v0.2.2 (Beta 333.333 - Tauri)</Text>
+                                <Text style={styles.versionText}>v1.2.1 (Beta 2)</Text>
                             </View>
                         </View>
 
