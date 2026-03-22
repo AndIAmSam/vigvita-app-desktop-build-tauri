@@ -55,32 +55,32 @@ jobs:
           prerelease: false
           args: ${{ matrix.args }}
 
-  rewrite-update-urls:
-    needs: publish-tauri
-    runs-on: ubuntu-latest
-    permissions:
-      contents: write
-    steps:
-      - name: Rewrite latest.json URLs to server
-        env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-        run: |
-          VERSION="${GITHUB_REF_NAME#v}"
-          RELEASE_TAG="app-v${VERSION}"
+  # rewrite-update-urls:
+  #   needs: publish-tauri
+  #   runs-on: ubuntu-latest
+  #   permissions:
+  #     contents: write
+  #   steps:
+  #     - name: Rewrite latest.json URLs to server
+  #       env:
+  #         GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+  #       run: |
+  #         VERSION="${GITHUB_REF_NAME#v}"
+  #         RELEASE_TAG="app-v${VERSION}"
 
-          echo "Downloading latest.json from release ${RELEASE_TAG}..."
-          gh release download "${RELEASE_TAG}" -p "latest.json" -R "${{ github.repository }}"
+  #         echo "Downloading latest.json from release ${RELEASE_TAG}..."
+  #         gh release download "${RELEASE_TAG}" -p "latest.json" -R "${{ github.repository }}"
 
-          echo "Before rewrite:"
-          cat latest.json
+  #         echo "Before rewrite:"
+  #         cat latest.json
 
-          GITHUB_URL="https://github.com/${{ github.repository }}/releases/download/${RELEASE_TAG}"
-          SERVER_URL="https://vigvita.com.mx/app/u"
-          sed -i "s|${GITHUB_URL}|${SERVER_URL}|g" latest.json
+  #         GITHUB_URL="https://github.com/${{ github.repository }}/releases/download/${RELEASE_TAG}"
+  #         SERVER_URL="https://vigvita.com.mx/app/u"
+  #         sed -i "s|${GITHUB_URL}|${SERVER_URL}|g" latest.json
 
-          echo "After rewrite:"
-          cat latest.json
+  #         echo "After rewrite:"
+  #         cat latest.json
 
-          gh release delete-asset "${RELEASE_TAG}" "latest.json" -R "${{ github.repository }}" -y
-          gh release upload "${RELEASE_TAG}" "latest.json" -R "${{ github.repository }}"
-          echo "Done! latest.json URLs now point to server."
+  #         gh release delete-asset "${RELEASE_TAG}" "latest.json" -R "${{ github.repository }}" -y
+  #         gh release upload "${RELEASE_TAG}" "latest.json" -R "${{ github.repository }}"
+  #         echo "Done! latest.json URLs now point to server."
