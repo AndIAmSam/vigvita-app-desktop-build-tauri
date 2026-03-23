@@ -39,8 +39,6 @@ jobs:
       - name: build frontend
         run: npx expo export -p web
         working-directory: ./app
-        env:
-          EXPO_PUBLIC_API_URL: "http://localhost:8080"
 
       - uses: tauri-apps/tauri-action@v0
         env:
