@@ -124,8 +124,8 @@ export default function LoginScreen() {
                                     style={styles.mainLogo}
                                     resizeMode="contain"
                                 />
-                                <Text style={styles.appName}>ADN</Text>
-                                <Text style={styles.appSubtitle}>APP ASESORES</Text>
+                                <Text style={styles.appName}>VigADN</Text>
+                                <Text style={styles.appSubtitle}>Desktop</Text>
                             </View>
 
                             {/* <Text style={styles.cardTitle}>Bienvenido</Text> */}
@@ -182,7 +182,7 @@ export default function LoginScreen() {
                                     style={styles.secondaryLogo}
                                     resizeMode="contain"
                                 />
-                                <Text style={styles.versionText}>v0.3.4 (Testing Update)</Text>
+                                <Text style={styles.versionText}>v1.0.0</Text>
                             </View>
                         </View>
 

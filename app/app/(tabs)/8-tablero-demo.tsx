@@ -318,11 +318,8 @@ export default function TableroCopiaScreen() {
                                     <FontAwesome name="user" size={32} color={COLORS.azul1} />
                                 </View>
                             </View>
-                            <View style={{ flex: 1, marginRight: 10 }}>
-                                <Text style={styles.welcomeLabel}>PANEL DE ASESOR</Text>
-                                <Text style={styles.userNameText} numberOfLines={1}>
-                                    ¡Hola, {advisor?.nombre ? advisor.nombre.split(' ')[0].charAt(0).toUpperCase() + advisor.nombre.split(' ')[0].slice(1).toLowerCase() : 'Usuario'}!
-                                </Text>
+                            <View style={{ flex: 1, marginRight: 10, justifyContent: 'center' }}>
+                                <Text style={styles.userNameText}>PANEL DE ASESOR</Text>
                             </View>
                             <TouchableOpacity onPress={handleLogout} style={styles.logoutBtn} activeOpacity={0.7}>
                                 <FontAwesome name="sign-out" size={16} color={COLORS.rojoTexto} />
@@ -365,7 +362,7 @@ export default function TableroCopiaScreen() {
                         activeOpacity={0.7}
                     >
                         <View style={{ flexDirection: 'row', alignItems: 'center' }}>
-                            <Text style={styles.sectionTitle}>Lista de Prospectos</Text>
+                            <Text style={styles.sectionTitle}>Base de Prospectos</Text>
                             <View style={styles.badgeCount}><Text style={styles.badgeText}>{filteredClients.length}</Text></View>
                         </View>
                         <FontAwesome name={isClientsExpanded ? "chevron-up" : "chevron-down"} size={16} color={COLORS.azul1} />
@@ -429,7 +426,7 @@ export default function TableroCopiaScreen() {
                         activeOpacity={0.7}
                     >
                         <View style={{ flexDirection: 'row', alignItems: 'center' }}>
-                            <Text style={styles.sectionTitle}>Lista de Referidos</Text>
+                            <Text style={styles.sectionTitle}>Base de Referidos</Text>
                             <View style={[styles.badgeCount, { backgroundColor: COLORS.grisInput }]}><Text style={styles.badgeText}>{filteredReferidos.length}</Text></View>
                         </View>
                         <FontAwesome name={isRefsExpanded ? "chevron-up" : "chevron-down"} size={16} color={COLORS.verde} />
