@@ -40,6 +40,24 @@ jobs:
         run: npx expo export -p web
         working-directory: ./app
 
+        # --- NUEVO PASO DE FIRMADO AD-HOC ---
+      - name: Build and Ad-Hoc Sign (macOS)
+        if: matrix.platform == 'macos-latest'
+        run: |
+          # 1. Instalamos el CLI de Tauri globalmente para tener control
+          npm install -g @tauri-apps/cli
+          
+          # 2. Compilamos solo el bundle .app (sin crear el DMG todavía)
+          # Ajusta el path si tu carpeta de tauri no está en ./app/src-tauri
+          cd app && tauri build --target aarch64-apple-darwin --bundles app
+          
+          # 3. Firmamos el .app de forma recursiva (Ad-Hoc)
+          # Usamos un comodín *.app para que no falle si cambias el nombre del proyecto
+          find src-tauri/target/aarch64-apple-darwin/release/bundle/macos -name "*.app" -exec codesign --force --deep --sign - {} +
+          
+          echo "Firma Ad-Hoc completada con éxito."
+        shell: bash
+
       - uses: tauri-apps/tauri-action@v0
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
