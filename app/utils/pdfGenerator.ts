@@ -214,6 +214,7 @@ export const generatePDF = async (data: any, type: "cliente" | "asesor") => {
         })
         .join("")}
         </div>
+        ${type === "asesor" ? `
         <div style="margin-top:10px; background:#f9fafb; padding:8px; border:1px solid #ccc; font-size: 10px; page-break-inside: avoid;">
             <div style="font-weight:bold; margin-bottom:4px;">NOTAS DE ENTREVISTA:</div>
             ${data.perfil.notaProteccion ? `<div style="margin-bottom:2px; line-height: 1.3 !important;"><strong>Protección:</strong> ${data.perfil.notaProteccion}</div>` : ""}
@@ -223,6 +224,7 @@ export const generatePDF = async (data: any, type: "cliente" | "asesor") => {
             ${data.perfil.notaSalud ? `<div style="margin-bottom:2px; line-height: 1.3 !important;"><strong>Salud:</strong> ${data.perfil.notaSalud}</div>` : ""}
             ${data.perfil.notaRiesgos ? `<div style="margin-bottom:2px; line-height: 1.3 !important;"><strong>Riesgos:</strong> ${data.perfil.notaRiesgos}</div>` : ""}
         </div>
+        ` : ""}
     `;
   }
 
