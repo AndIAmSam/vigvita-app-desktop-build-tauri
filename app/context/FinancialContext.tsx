@@ -435,27 +435,7 @@ export const FinancialProvider = ({ children }: { children: ReactNode }) => {
     setAlertVisible(true);
   };
 
-  // INIT
-  useEffect(() => {
-    const init = async () => {
-      try {
-        // 1. Cargar Sesión
-        const storedAdvisor = await localforage.getItem<string>("advisor_session");
-        if (storedAdvisor) {
-          const parsed = JSON.parse(storedAdvisor);
-          setAdvisor(parsed);
-          setUserName(parsed.nombre);
-        }
-
-        // 2. Cargar DB Local
-        const storedDB = await localforage.getItem<string>("clientes_db");
-        if (storedDB) setListaClientes(JSON.parse(storedDB));
-      } catch (e) {
-        console.error("Error init", e);
-      }
-    };
-    init();
-  }, []);
+  // ELIMINADO: useEffect inicial duplicado que causaba Race Condition
 
   // AUTO SYNC TRIGGER
   useEffect(() => {
@@ -841,10 +821,10 @@ export const FinancialProvider = ({ children }: { children: ReactNode }) => {
         // ÉXITO: Parsear respuesta para obtener UUIDs
         let returnedUuids: string[] = [];
         try {
-            const resJson = await response.json();
-            returnedUuids = resJson.data || [];
+          const resJson = await response.json();
+          returnedUuids = resJson.data || [];
         } catch (err) {
-            console.log("No se pudo parsear response de v3 o devolvió vacio. Errores posibles.");
+          console.log("No se pudo parsear response de v3 o devolvió vacio. Errores posibles.");
         }
 
         setListaClientes((prev) => {
@@ -853,10 +833,10 @@ export const FinancialProvider = ({ children }: { children: ReactNode }) => {
             if (syncIndex !== -1) {
               // El cliente estaba pendiente y se mandó
               const serverUuid = returnedUuids[syncIndex];
-              return { 
-                  ...c, 
-                  sincronizado: true,
-                  serverId: serverUuid || c.serverId // Preservamos si ya tenía o cargamos el nuevo
+              return {
+                ...c,
+                sincronizado: true,
+                serverId: serverUuid || c.serverId // Preservamos si ya tenía o cargamos el nuevo
               };
             }
             return c;
@@ -869,7 +849,7 @@ export const FinancialProvider = ({ children }: { children: ReactNode }) => {
 
         setSyncStatus("synced");
         setLastSyncTime(new Date().toLocaleTimeString());
-        
+
         return "Sincronización exitosa con el servidor.";
       } else {
         // Fallo al crear en servidor
@@ -893,7 +873,7 @@ export const FinancialProvider = ({ children }: { children: ReactNode }) => {
   };
 
 
-  // INIT (MODIFICADO PARA VERIFICAR CADUCIDAD)
+  // INIT (UNIFICADO Y CORREGIDO PARA EVITAR RACE CONDITION)
   useEffect(() => {
     const init = async () => {
       try {
@@ -903,11 +883,16 @@ export const FinancialProvider = ({ children }: { children: ReactNode }) => {
         if (storedSession) {
           const parsedSession = JSON.parse(storedSession);
 
-          // La sesión ahora es permanente
-          setAdvisor(parsedSession.user);
-          setUserName(parsedSession.user.nombre);
-        }
+          // Compatibilidad: Si tiene la propiedad .user, es el formato moderno ({user, loginTime}). 
+          // Si no la tiene, asumimos que es el formato viejo (objeto plano con el token).
+          const validUser = parsedSession.user ? parsedSession.user : parsedSession;
 
+          // La sesión ahora es permanente
+          if (validUser && validUser.token) {
+            setAdvisor(validUser);
+            setUserName(validUser.nombre);
+          }
+        }
         // 2. Cargar DB Local (Igual que antes)
         const storedDB = await localforage.getItem<string>("clientes_db");
         if (storedDB) setListaClientes(JSON.parse(storedDB));
@@ -941,7 +926,7 @@ export const FinancialProvider = ({ children }: { children: ReactNode }) => {
         // Creamos un usuario con el token devuelto
         const user: Advisor = {
           id: "ADV-" + Math.floor(Math.random() * 1000), // Temporalmente un ID ficticio (el doc solo indica token)
-          nombre: email.split("@")[0], // Nombre temporal derivado del correo
+          nombre: data.name || email.split("@")[0], // Nombre del backend (API v4) con fallback
           email: email,
           token: data.token,
         };
@@ -1166,7 +1151,7 @@ export const FinancialProvider = ({ children }: { children: ReactNode }) => {
     await localforage.setItem("clientes_db", JSON.stringify(nuevaLista));
     setSyncStatus("pending"); // Activa alerta visual
     showAlert("Prospecto guardado exitosamente.");
-    
+
     // Disparar sincronización automática pasando el contexto actualizado para evitar carrera
     forceSync(nuevaLista);
   };
@@ -1275,7 +1260,7 @@ export const FinancialProvider = ({ children }: { children: ReactNode }) => {
     if (!silencioso) {
       showAlert("Listo para nuevo prospecto. Sincronizando...");
     }
-    
+
     // Auto-sync
     forceSync();
   };

@@ -1,6 +1,6 @@
 import React, { useEffect, useRef, useState } from 'react';
-import { Tabs } from 'expo-router';
-import { View, StyleSheet, useWindowDimensions, TouchableOpacity, Animated, Text } from 'react-native';
+import { Tabs, usePathname } from 'expo-router';
+import { View, StyleSheet, useWindowDimensions, TouchableOpacity, Animated, Text, Image } from 'react-native';
 import { FontAwesome } from '@expo/vector-icons';
 import { useFinancialData } from '../../context/FinancialContext';
 
@@ -178,7 +178,9 @@ function CustomTabBar({ state, descriptors, navigation }: any) {
 
 // --- EXPORTACIÓN PRINCIPAL ---
 export default function TabLayout() {
-  const { lastSyncTime, syncStatus, isOnline } = useFinancialData();
+  const { lastSyncTime, syncStatus, isOnline, advisor } = useFinancialData();
+  const pathname = usePathname();
+  const showAdvisorBadge = advisor?.nombre && !pathname.includes('8-tablero-demo');
 
   return (
     <View style={{ flex: 1 }}>
@@ -217,6 +219,21 @@ export default function TabLayout() {
         <View style={styles.syncIndicator}>
           <FontAwesome name="refresh" size={10} color="#f59e0b" style={{ marginRight: 4 }} />
           <Text style={[styles.syncIndicatorText, { color: '#f59e0b' }]}>Sincronizando...</Text>
+        </View>
+      )}
+
+      {/* Logos + nombre del asesor - esquina superior derecha, apilados */}
+      {showAdvisorBadge && (
+        <View style={styles.brandingStack}>
+          <View style={styles.logosBadge}>
+            <Image source={require('../../assets/logo.png')} style={styles.logosBadgeImg} resizeMode="contain" />
+            <View style={styles.logosBadgeDivider} />
+            <Image source={require('../../assets/metlife-logo.png')} style={styles.logosBadgeImg} resizeMode="contain" />
+          </View>
+          <View style={styles.advisorBadge}>
+            <FontAwesome name="user" size={9} color="#94a3b8" style={{ marginRight: 5 }} />
+            <Text style={styles.advisorBadgeText}>{advisor.nombre}</Text>
+          </View>
         </View>
       )}
     </View>
@@ -267,5 +284,56 @@ const styles = StyleSheet.create({
     fontSize: 10,
     color: '#64748b',
     fontWeight: '500',
-  }
+  },
+  brandingStack: {
+    position: 'absolute',
+    top: 8,
+    right: 12,
+    alignItems: 'flex-end',
+    zIndex: 999,
+    maxWidth: '45%',
+  },
+  logosBadge: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    backgroundColor: 'rgba(255, 255, 255, 0.85)',
+    paddingHorizontal: 10,
+    paddingVertical: 6,
+    borderRadius: 12,
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.06,
+    shadowRadius: 4,
+    elevation: 2,
+  },
+  logosBadgeImg: {
+    width: 55,
+    height: 30,
+    opacity: 0.9,
+  },
+  logosBadgeDivider: {
+    width: 1,
+    height: 20,
+    backgroundColor: '#e5e7eb',
+    marginHorizontal: 8,
+  },
+  advisorBadge: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    backgroundColor: 'rgba(255, 255, 255, 0.9)',
+    paddingHorizontal: 10,
+    paddingVertical: 4,
+    borderRadius: 10,
+    marginTop: 4,
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 1 },
+    shadowOpacity: 0.05,
+    shadowRadius: 3,
+    elevation: 1,
+  },
+  advisorBadgeText: {
+    fontSize: 11,
+    color: '#64748b',
+    fontWeight: '600',
+  },
 });

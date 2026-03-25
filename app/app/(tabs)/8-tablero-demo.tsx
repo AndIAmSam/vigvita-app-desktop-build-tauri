@@ -319,7 +319,8 @@ export default function TableroCopiaScreen() {
                                 </View>
                             </View>
                             <View style={{ flex: 1, marginRight: 10, justifyContent: 'center' }}>
-                                <Text style={styles.userNameText}>PANEL DE ASESOR</Text>
+                                <Text style={styles.panelLabel}>PANEL DE ASESOR</Text>
+                                <Text style={styles.userNameText} numberOfLines={1}>{advisor?.nombre || ''}</Text>
                             </View>
                             <TouchableOpacity onPress={handleLogout} style={styles.logoutBtn} activeOpacity={0.7}>
                                 <FontAwesome name="sign-out" size={16} color={COLORS.rojoTexto} />
@@ -734,7 +735,8 @@ const styles = StyleSheet.create({
     avatarContainer: { marginRight: 16 },
     avatarCircle: { width: 56, height: 56, borderRadius: 28, backgroundColor: '#e0f2fe', justifyContent: 'center', alignItems: 'center', borderWidth: 2, borderColor: COLORS.blanco, shadowColor: COLORS.azul1, shadowOffset: { width: 0, height: 4 }, shadowOpacity: 0.15, shadowRadius: 8, elevation: 4 },
     welcomeLabel: { fontSize: 10, fontWeight: '800', color: COLORS.textoGris, letterSpacing: 1.5, marginBottom: 4 },
-    userNameText: { fontSize: 26, fontWeight: '900', color: COLORS.negro, letterSpacing: -0.5 },
+    panelLabel: { fontSize: 11, fontWeight: '700', color: COLORS.textoGris, letterSpacing: 1.5, textTransform: 'uppercase' as const, marginBottom: 2 },
+    userNameText: { fontSize: 22, fontWeight: '900', color: COLORS.negro, letterSpacing: -0.5 },
 
     cardSession: { width: '100%', maxWidth: 600, backgroundColor: COLORS.blanco, borderRadius: 24, padding: 25, shadowColor: "#000", shadowOffset: { width: 0, height: 10 }, shadowOpacity: 0.1, shadowRadius: 20, elevation: 5, borderWidth: 1, borderColor: 'rgba(0,0,0,0.02)' },
     sessionHeader: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: 20 },
