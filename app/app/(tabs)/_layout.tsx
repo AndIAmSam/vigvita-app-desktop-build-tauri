@@ -47,8 +47,8 @@ const TAB_LABELS: { [key: string]: string } = {
 function CustomTabBar({ state, descriptors, navigation }: any) {
   const { width } = useWindowDimensions();
 
-  // Filtramos las rutas ocultas (como '9-notas' o '8-tablero' que no queremos mostrar por ahora)
-  const visibleRoutes = state.routes.filter((r: any) => !['_sitemap', '+not-found', '9-notas', '8-tablero'].includes(r.name));
+  // Filtramos las rutas ocultas
+  const visibleRoutes = state.routes.filter((r: any) => !['_sitemap', '+not-found', '9-notas', '8-tablero', '8-tablero-old'].includes(r.name));
 
   const totalTabs = visibleRoutes.length;
 
@@ -205,6 +205,7 @@ export default function TabLayout() {
 
         {/* Rutas ocultas del TabBar */}
         <Tabs.Screen name="8-tablero" options={{ href: null }} />
+        <Tabs.Screen name="8-tablero-old" options={{ href: null }} />
         <Tabs.Screen name="9-notas" options={{ href: null }} />
       </Tabs>
 
