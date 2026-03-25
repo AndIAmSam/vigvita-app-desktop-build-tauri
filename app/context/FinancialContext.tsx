@@ -889,6 +889,11 @@ export const FinancialProvider = ({ children }: { children: ReactNode }) => {
 
           // La sesión ahora es permanente
           if (validUser && validUser.token) {
+            // Limpiar nombres legacy derivados del email (antes del @)
+            const emailPrefix = validUser.email?.split("@")[0] || "";
+            if (validUser.nombre && validUser.nombre === emailPrefix) {
+              validUser.nombre = ""; // Era un nombre falso derivado del email
+            }
             setAdvisor(validUser);
             setUserName(validUser.nombre);
           }
@@ -926,7 +931,7 @@ export const FinancialProvider = ({ children }: { children: ReactNode }) => {
         // Creamos un usuario con el token devuelto
         const user: Advisor = {
           id: "ADV-" + Math.floor(Math.random() * 1000), // Temporalmente un ID ficticio (el doc solo indica token)
-          nombre: data.name || email.split("@")[0], // Nombre del backend (API v4) con fallback
+          nombre: data.name || "", // Solo usar nombre del backend; vacío hasta que el backend lo devuelva
           email: email,
           token: data.token,
         };
