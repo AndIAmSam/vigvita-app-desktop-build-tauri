@@ -182,7 +182,8 @@ interface FinancialData {
     email: string,
     pass: string,
   ) => Promise<{ success: boolean; error?: string }>;
-  logout: () => void;
+  logout: () => Promise<void>;
+  validateSession: () => Promise<boolean>;
   isAuthenticated: boolean;
 
   // NUEVO: Sync
@@ -981,6 +982,41 @@ export const FinancialProvider = ({ children }: { children: ReactNode }) => {
     // No borramos la DB local, solo la sesión
   };
 
+  const validateSession = async (): Promise<boolean> => {
+    if (!advisor?.token) return false;
+    
+    // Si no estamos en línea (simulador interno), no podemos validar, dejamos pasar.
+    if (!isOnline) return true;
+
+    try {
+      const API_BASE_URL = process.env.EXPO_PUBLIC_API_URL || "https://vigvita.com.mx";
+      // Hacemos ping a una ruta protegida con un payload vacío.
+      const targetUrl = `${API_BASE_URL}/api/profiles/new`;
+
+      const response = await fetch(targetUrl, {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          "Authorization": `Bearer ${advisor.token}`
+        },
+        body: JSON.stringify({ clients: [] }) 
+      });
+
+      // El middleware auth lanza 404/401 si el usuario fue borrado o si el token caducó.
+      if (response.status === 404 || response.status === 401 || response.status === 403) {
+        await logout(); // Force logout inmediatamente
+        return false;
+      }
+      
+      // Si la API responde 422 (Body empty) u otro código, la autenticación fue exitosa.
+      return true;
+    } catch (e) {
+      // Errores de red reales (offline temporal), no hacemos logout.
+      console.warn("Fallo de red al intentar validar la sesión silenciosa:", e);
+      return true;
+    }
+  };
+
   // --- SETTERS ESTÁNDAR (Igual que antes) ---
   const updatePerfil = (f: keyof PerfilData, v: any) =>
     setPerfil((p) => ({ ...p, [f]: v }));
@@ -1338,6 +1374,7 @@ export const FinancialProvider = ({ children }: { children: ReactNode }) => {
         advisor,
         login,
         logout,
+        validateSession,
         isAuthenticated: !!advisor,
         userName,
         setUserName: saveVendorName,

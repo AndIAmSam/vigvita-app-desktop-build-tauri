@@ -1,5 +1,5 @@
 import React, { useEffect, useRef, useState } from 'react';
-import { Tabs, usePathname } from 'expo-router';
+import { Tabs, usePathname, useRouter } from 'expo-router';
 import { View, StyleSheet, useWindowDimensions, TouchableOpacity, Animated, Text, Image } from 'react-native';
 import { FontAwesome } from '@expo/vector-icons';
 import { useFinancialData } from '../../context/FinancialContext';
@@ -178,9 +178,34 @@ function CustomTabBar({ state, descriptors, navigation }: any) {
 
 // --- EXPORTACIÓN PRINCIPAL ---
 export default function TabLayout() {
-  const { lastSyncTime, syncStatus, isOnline, advisor } = useFinancialData();
+  const { lastSyncTime, syncStatus, isOnline, advisor, validateSession, logout } = useFinancialData();
   const pathname = usePathname();
+  const router = useRouter();
   const showAdvisorBadge = advisor?.nombre && !pathname.includes('8-tablero-demo');
+
+  // --- GUARDIÁN DE SESIÓN ACTIVO ---
+  // Se dispara cada vez que el usuario cambia de ruta en la barra de navegación.
+  useEffect(() => {
+    let mounted = true;
+    const verifyAccess = async () => {
+      // 1. Si de entrada no hay asesor en el contexto local temporal, pa' fuera.
+      if (!advisor) {
+        if (mounted) router.replace('/');
+        return;
+      }
+      
+      // 2. Ping silencioso a la API
+      const isValid = await validateSession();
+      if (!isValid) {
+        // La API rechazó el token (401/404). El contexto ya hizo logout(), solo lo mandamos al index.
+        console.warn("🔒 SESIÓN DECLINADA: Expulsando usuario.");
+        if (mounted) router.replace('/');
+      }
+    };
+    verifyAccess();
+    return () => { mounted = false; };
+  }, [pathname, advisor]);
+
 
   return (
     <View style={{ flex: 1 }}>
