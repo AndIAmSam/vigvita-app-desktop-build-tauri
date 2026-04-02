@@ -883,6 +883,10 @@ export const FinancialProvider = ({ children }: { children: ReactNode }) => {
   };
 
 
+  // --- SEGURIDAD: CONTROL DE VERSIÓN DE SESIONES ---
+  // Cambia este número (+1) cuando necesites expulsar forzosamente a TODOS los usuarios (deslogueo masivo al actualizar).
+  const APP_SESSION_VERSION = 2;
+
   // INIT (UNIFICADO Y CORREGIDO PARA EVITAR RACE CONDITION)
   useEffect(() => {
     const init = async () => {
@@ -897,10 +901,17 @@ export const FinancialProvider = ({ children }: { children: ReactNode }) => {
           // Si no la tiene, asumimos que es el formato viejo (objeto plano con el token).
           const validUser = parsedSession.user ? parsedSession.user : parsedSession;
           const loginTime = parsedSession.loginTime || Date.now(); // Fallback si era legacy
+          const sessionVersion = parsedSession.sessionVersion || 1; // Asumimos versión 1 si no lo traía
 
           // Límite estricto de 7 días offline (7 * 24 * 60 * 60 * 1000 ms)
           const MAX_OFFLINE_MS = 7 * 24 * 60 * 60 * 1000;
-          if (Date.now() - loginTime > MAX_OFFLINE_MS) {
+          
+          if (sessionVersion !== APP_SESSION_VERSION) {
+            console.warn(`Sesión antigua (v${sessionVersion}) detectada. Se requiere v${APP_SESSION_VERSION}. Forzando purga de credenciales.`);
+            await localforage.removeItem("advisor_session");
+            // No seteamos el advisor, así que arrancan deslogueados.
+            // NOTA: No tocamos clientes_db para proteger datos de prospectos ingresados offline.
+          } else if (Date.now() - loginTime > MAX_OFFLINE_MS) {
             console.warn("Sesión expirada tras 7 días sin validación online. Forzando relogin.");
             await localforage.removeItem("advisor_session");
             // No seteamos el advisor, arranca deslogueado directo al Index.
@@ -961,6 +972,7 @@ export const FinancialProvider = ({ children }: { children: ReactNode }) => {
         const sessionData = {
           user: user,
           loginTime: Date.now(), // CRÍTICO PARA LA CADUCIDAD
+          sessionVersion: APP_SESSION_VERSION // CRÍTICO PARA PURGA MASIVA AL ACTUALIZAR
         };
 
         setAdvisor(user);
@@ -1042,6 +1054,7 @@ export const FinancialProvider = ({ children }: { children: ReactNode }) => {
           // Actualización de compatibilidad a formato envoltorio si no lo tenía:
           const newSession = session.user ? session : { user: session };
           newSession.loginTime = Date.now();
+          newSession.sessionVersion = APP_SESSION_VERSION; // Remachamos la versión de seguridad
           await localforage.setItem("advisor_session", JSON.stringify(newSession));
         }
       } catch (err) {
