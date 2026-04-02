@@ -818,6 +818,13 @@ export const FinancialProvider = ({ children }: { children: ReactNode }) => {
 
       console.log(`[SYNC-V3] Respuesta del servidor - Status: ${response.status}`);
 
+      // NUEVO: INTERCEPTOR DE SEGURIDAD EN GUARDADO SILENCIOSO
+      if (response.status === 401 || response.status === 403 || response.status === 404) {
+        console.warn("🔒 SESIÓN DECLINADA DURANTE SINCRONIZACIÓN: Usuario eliminado o token inválido.");
+        await logout();
+        return "ERROR: Sesión Inválida. Su acceso ha sido revocado y la sesión cerrada.";
+      }
+
       if (response.status === 201) {
         // ÉXITO: Parsear respuesta para obtener UUIDs
         let returnedUuids: string[] = [];
@@ -887,16 +894,25 @@ export const FinancialProvider = ({ children }: { children: ReactNode }) => {
           // Compatibilidad: Si tiene la propiedad .user, es el formato moderno ({user, loginTime}). 
           // Si no la tiene, asumimos que es el formato viejo (objeto plano con el token).
           const validUser = parsedSession.user ? parsedSession.user : parsedSession;
+          const loginTime = parsedSession.loginTime || Date.now(); // Fallback si era legacy
 
-          // La sesión ahora es permanente
-          if (validUser && validUser.token) {
-            // Limpiar nombres legacy derivados del email (antes del @)
-            const emailPrefix = validUser.email?.split("@")[0] || "";
-            if (validUser.nombre && validUser.nombre === emailPrefix) {
-              validUser.nombre = ""; // Era un nombre falso derivado del email
+          // Límite estricto de 7 días offline (7 * 24 * 60 * 60 * 1000 ms)
+          const MAX_OFFLINE_MS = 7 * 24 * 60 * 60 * 1000;
+          if (Date.now() - loginTime > MAX_OFFLINE_MS) {
+            console.warn("Sesión expirada tras 7 días sin validación online. Forzando relogin.");
+            await localforage.removeItem("advisor_session");
+            // No seteamos el advisor, arranca deslogueado directo al Index.
+          } else {
+            // La sesión sigue vigente offline temporalmente
+            if (validUser && validUser.token) {
+              // Limpiar nombres legacy derivados del email (antes del @)
+              const emailPrefix = validUser.email?.split("@")[0] || "";
+              if (validUser.nombre && validUser.nombre === emailPrefix) {
+                validUser.nombre = ""; // Era un nombre falso derivado del email
+              }
+              setAdvisor(validUser);
+              setUserName(validUser.nombre);
             }
-            setAdvisor(validUser);
-            setUserName(validUser.nombre);
           }
         }
         // 2. Cargar DB Local (Igual que antes)
@@ -1009,11 +1025,46 @@ export const FinancialProvider = ({ children }: { children: ReactNode }) => {
       }
       
       // Si la API responde 422 (Body empty) u otro código, la autenticación fue exitosa.
+      
+      // Actualizamos el TimeStamp para renovar sus 7 días de vida offline:
+      try {
+        const sessionStr = await localforage.getItem<string>("advisor_session");
+        if (sessionStr) {
+          const session = JSON.parse(sessionStr);
+          // Actualización de compatibilidad a formato envoltorio si no lo tenía:
+          const newSession = session.user ? session : { user: session };
+          newSession.loginTime = Date.now();
+          await localforage.setItem("advisor_session", JSON.stringify(newSession));
+        }
+      } catch (err) {
+        // Ignoramos silentemente si hay error puramente al escribir
+      }
+
       return true;
-    } catch (e) {
-      // Errores de red reales (offline temporal), no hacemos logout.
-      console.warn("Fallo de red al intentar validar la sesión silenciosa:", e);
-      return true;
+    } catch (e: any) {
+      // ¡AQUÍ ESTÁ EL TRAMPA DEL BACKEND!
+      // Muchos middlewares que devuelven 404 o panic ignoran añadir los headers de CORS en su respuesta.
+      // Cuando esto sucede, tu navegador/Tauri lanza un "TypeError: Failed to fetch" y entra a este CATCH, haciéndonos creer que no hay internet.
+      
+      // Para diferenciar si es un error de CORS (token revocado) o si realmente no hay internet, probaremos una ruta PÚBLICA.
+      try {
+        const API_BASE_URL = process.env.EXPO_PUBLIC_API_URL || "https://vigvita.com.mx";
+        const publicPing = await fetch(`${API_BASE_URL}/api/login`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({}) // Esto arrojará 422 forzosamente, pero devolverá headers CORS.
+        });
+        
+        // Si llegamos hasta aquí, el usuario SÍ TIENE INTERNET.
+        // Significa que el error original fue el backend bloqueándolo (CORS/Auth 404)
+        console.warn("Detección de Bloqueo por CORS: El token es inválido o el usuario no existe.");
+        await logout();
+        return false;
+      } catch (offlineError) {
+        // Falló también la ruta pública. ESTO SÍ ES QUE NO HAY INTERNET.
+        console.warn("Fallo real de red. El usuario no está conectado a internet. Permitiendo acceso por caché.");
+        return true;
+      }
     }
   };
 

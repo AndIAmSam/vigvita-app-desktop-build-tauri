@@ -1,6 +1,6 @@
 import React, { useEffect, useRef, useState } from 'react';
 import { Tabs, usePathname, useRouter } from 'expo-router';
-import { View, StyleSheet, useWindowDimensions, TouchableOpacity, Animated, Text, Image } from 'react-native';
+import { View, StyleSheet, useWindowDimensions, TouchableOpacity, Animated, Text, Image, AppState } from 'react-native';
 import { FontAwesome } from '@expo/vector-icons';
 import { useFinancialData } from '../../context/FinancialContext';
 
@@ -184,26 +184,44 @@ export default function TabLayout() {
   const showAdvisorBadge = advisor?.nombre && !pathname.includes('8-tablero-demo');
 
   // --- GUARDIÁN DE SESIÓN ACTIVO ---
-  // Se dispara cada vez que el usuario cambia de ruta en la barra de navegación.
+  // Se dispara al cambiar de pestaña, pero TAMBIÉN periódicamente cada 15 segundos y al volver a la app.
   useEffect(() => {
     let mounted = true;
+    let intervalId: any;
+
     const verifyAccess = async () => {
-      // 1. Si de entrada no hay asesor en el contexto local temporal, pa' fuera.
       if (!advisor) {
         if (mounted) router.replace('/');
         return;
       }
       
-      // 2. Ping silencioso a la API
       const isValid = await validateSession();
       if (!isValid) {
-        // La API rechazó el token (401/404). El contexto ya hizo logout(), solo lo mandamos al index.
         console.warn("🔒 SESIÓN DECLINADA: Expulsando usuario.");
         if (mounted) router.replace('/');
       }
     };
+
+    // 1. Verificación inmediata al montar o cambiar ruta
     verifyAccess();
-    return () => { mounted = false; };
+
+    // 2. Verificación periódica (cada 15 segundos) por si el usuario se queda quieto
+    intervalId = setInterval(() => {
+      verifyAccess();
+    }, 15000);
+
+    // 3. Verificación al traer la app del fondo (background -> active)
+    const subscription = AppState.addEventListener("change", (nextAppState) => {
+      if (nextAppState === "active") {
+        verifyAccess();
+      }
+    });
+
+    return () => { 
+      mounted = false; 
+      clearInterval(intervalId);
+      subscription.remove();
+    };
   }, [pathname, advisor]);
 
 
