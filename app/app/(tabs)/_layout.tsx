@@ -1,5 +1,5 @@
 import React, { useEffect, useRef, useState } from 'react';
-import { Tabs, usePathname, useRouter } from 'expo-router';
+import { Tabs, usePathname, useRouter, useRootNavigationState } from 'expo-router';
 import { View, StyleSheet, useWindowDimensions, TouchableOpacity, Animated, Text, Image, AppState } from 'react-native';
 import { FontAwesome } from '@expo/vector-icons';
 import { useFinancialData } from '../../context/FinancialContext';
@@ -178,23 +178,30 @@ function CustomTabBar({ state, descriptors, navigation }: any) {
 
 // --- EXPORTACIÓN PRINCIPAL ---
 export default function TabLayout() {
-  const { lastSyncTime, syncStatus, isOnline, advisor, validateSession, logout } = useFinancialData();
+  const { isInitialized, lastSyncTime, syncStatus, isOnline, advisor, validateSession, logout } = useFinancialData();
   const pathname = usePathname();
   const router = useRouter();
+  const rootNavigationState = useRootNavigationState();
   const showAdvisorBadge = advisor?.nombre && !pathname.includes('8-tablero-demo');
 
   // --- GUARDIÁN DE SESIÓN ACTIVO ---
   // Se dispara al cambiar de pestaña, pero TAMBIÉN periódicamente cada 15 segundos y al volver a la app.
   useEffect(() => {
+    // Si el enrutador de Expo no ha terminado de montar la aplicación, o si localforage sigue leyendo la memoria, abortamos.
+    // Esto evita: "Attempted to navigate before mounting the Root Layout component"
+    if (!rootNavigationState?.key || !isInitialized) return;
+
+    // Si ya no hay usuario (ej. acaba de ser expulsado), lo enviamos al index PERO ABORTAMOS AQUÍ MISMO.
+    // No registramos ningún cronómetro setInterval ni nada, porque ya está desconectado.
+    if (!advisor) {
+      router.replace('/');
+      return;
+    }
+
     let mounted = true;
     let intervalId: any;
 
     const verifyAccess = async () => {
-      if (!advisor) {
-        if (mounted) router.replace('/');
-        return;
-      }
-      
       const isValid = await validateSession();
       if (!isValid) {
         console.warn("🔒 SESIÓN DECLINADA: Expulsando usuario.");
@@ -222,7 +229,7 @@ export default function TabLayout() {
       clearInterval(intervalId);
       subscription.remove();
     };
-  }, [pathname, advisor]);
+  }, [pathname, advisor, rootNavigationState?.key, isInitialized]);
 
 
   return (

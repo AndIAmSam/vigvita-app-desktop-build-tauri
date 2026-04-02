@@ -5,7 +5,7 @@ import React, {
   ReactNode,
   useEffect,
 } from "react";
-import { Modal, View, Text, TouchableOpacity, StyleSheet } from "react-native";
+import { Modal, View, Text, TouchableOpacity, StyleSheet, Alert } from "react-native";
 import localforage from "localforage";
 import { LISTA_UNIVERSIDADES } from "../constants/UniversityData";
 
@@ -177,6 +177,7 @@ export interface ClienteGuardado {
 // Interfaz del Contexto
 interface FinancialData {
   // Auth
+  isInitialized: boolean;
   advisor: Advisor | null;
   login: (
     email: string,
@@ -391,7 +392,8 @@ const INITIAL_PIRAMIDE_LEVELS = [
 // 3. PROVIDER PRINCIPAL
 // ==========================================
 export const FinancialProvider = ({ children }: { children: ReactNode }) => {
-  // Auth & User
+  // GLOBAL STATES
+  const [isInitialized, setIsInitialized] = useState(false);
   const [advisor, setAdvisor] = useState<Advisor | null>(null);
   const [userName, setUserName] = useState(""); // Nombre visual (legacy)
 
@@ -865,7 +867,7 @@ export const FinancialProvider = ({ children }: { children: ReactNode }) => {
         console.error("Error from API:", response.status, errText);
         console.log("PAYLOAD SENT:", JSON.stringify(payload, null, 2));
         setSyncStatus("pending");
-        showAlert(`Error ${response.status}: ${errText.substring(0, 100)}... Revisa la consola para más detalles.`);
+        showAlert(`Error ${response.status}: ${errText.substring(0, 100)}... `);
         return "ERROR: Fallo al crear perfiles en el servidor.";
       }
     } catch (error) {
@@ -920,6 +922,8 @@ export const FinancialProvider = ({ children }: { children: ReactNode }) => {
         if (storedDB) setListaClientes(JSON.parse(storedDB));
       } catch (e) {
         console.error("Error init", e);
+      } finally {
+        setIsInitialized(true);
       }
     };
     init();
@@ -1000,7 +1004,7 @@ export const FinancialProvider = ({ children }: { children: ReactNode }) => {
 
   const validateSession = async (): Promise<boolean> => {
     if (!advisor?.token) return false;
-    
+
     // Si no estamos en línea (simulador interno), no podemos validar, dejamos pasar.
     if (!isOnline) return true;
 
@@ -1015,17 +1019,21 @@ export const FinancialProvider = ({ children }: { children: ReactNode }) => {
           "Content-Type": "application/json",
           "Authorization": `Bearer ${advisor.token}`
         },
-        body: JSON.stringify({ clients: [] }) 
+        body: JSON.stringify({ clients: [] })
       });
 
       // El middleware auth lanza 404/401 si el usuario fue borrado o si el token caducó.
-      if (response.status === 404 || response.status === 401 || response.status === 403) {
+      if (response.status === 404 || response.status === 401 || response.status === 403 || response.status === 500) {
+        Alert.alert("Error de Autenticación", `El sevidor denegó tu sesión (Código: ${response.status}). Saliendo...`);
         await logout(); // Force logout inmediatamente
         return false;
       }
       
       // Si la API responde 422 (Body empty) u otro código, la autenticación fue exitosa.
-      
+      if (response.status !== 422 && response.status !== 201 && response.status !== 200) {
+        Alert.alert("Advertencia de Red", `Respuesta inusual: ${response.status}`);
+      }
+
       // Actualizamos el TimeStamp para renovar sus 7 días de vida offline:
       try {
         const sessionStr = await localforage.getItem<string>("advisor_session");
@@ -1042,27 +1050,19 @@ export const FinancialProvider = ({ children }: { children: ReactNode }) => {
 
       return true;
     } catch (e: any) {
-      // ¡AQUÍ ESTÁ EL TRAMPA DEL BACKEND!
-      // Muchos middlewares que devuelven 404 o panic ignoran añadir los headers de CORS en su respuesta.
-      // Cuando esto sucede, tu navegador/Tauri lanza un "TypeError: Failed to fetch" y entra a este CATCH, haciéndonos creer que no hay internet.
-      
-      // Para diferenciar si es un error de CORS (token revocado) o si realmente no hay internet, probaremos una ruta PÚBLICA.
+      // Diferenciador infalible: ¿Es un error de Auth escondido por CORS, o me quedé sin internet?
       try {
-        const API_BASE_URL = process.env.EXPO_PUBLIC_API_URL || "https://vigvita.com.mx";
-        const publicPing = await fetch(`${API_BASE_URL}/api/login`, {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({}) // Esto arrojará 422 forzosamente, pero devolverá headers CORS.
-        });
+        // Hacer ping a GOOGLE con modo no-cors. Esto NUNCA lanzará error de CORS. Solo fallará si no hay internet físico.
+        await fetch("https://www.google.com/favicon.ico", { mode: "no-cors", cache: "no-store" });
         
-        // Si llegamos hasta aquí, el usuario SÍ TIENE INTERNET.
-        // Significa que el error original fue el backend bloqueándolo (CORS/Auth 404)
+        // Si no arrojó catch, SI HAY INTERNET. Por lo tanto el fetch al API base falló por rechazo de Auth.
         console.warn("Detección de Bloqueo por CORS: El token es inválido o el usuario no existe.");
         await logout();
+        Alert.alert("Bloqueo de Seguridad", "Tu acceso ha sido revocado. Entrando en modo desconectado.");
         return false;
       } catch (offlineError) {
-        // Falló también la ruta pública. ESTO SÍ ES QUE NO HAY INTERNET.
-        console.warn("Fallo real de red. El usuario no está conectado a internet. Permitiendo acceso por caché.");
+        // Falló el ping a google. NO HAY INTERNET.
+        console.warn("Fallo real de red (Desconectado). Permitiendo acceso por caché.");
         return true;
       }
     }
@@ -1422,6 +1422,7 @@ export const FinancialProvider = ({ children }: { children: ReactNode }) => {
   return (
     <FinancialContext.Provider
       value={{
+        isInitialized,
         advisor,
         login,
         logout,
