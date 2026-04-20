@@ -174,7 +174,7 @@ export default function LoginScreen() {
                             </TouchableOpacity>
 
                             {/* Disclaimer de Privacidad y Términos */}
-                            <View style={styles.disclaimerContainer}>
+                            {/* <View style={styles.disclaimerContainer}>
                                 <Text style={styles.disclaimerText}>
                                     Al iniciar sesión, aceptas nuestra{' '}
                                     <Text style={styles.linkText} onPress={() => Linking.openURL('https://vigvita.com.mx/privacy-policy')}>
@@ -185,7 +185,7 @@ export default function LoginScreen() {
                                         Términos y Condiciones de Uso
                                     </Text>.
                                 </Text>
-                            </View>
+                            </View> */}
 
                             {/* DEV OVERRIDE BOTON */}
                             {__DEV__ && (
@@ -207,7 +207,7 @@ export default function LoginScreen() {
                                     style={styles.secondaryLogo}
                                     resizeMode="contain"
                                 />
-                                <Text style={styles.versionText}>v1.0.12</Text>
+                                <Text style={styles.versionText}>v1.0.15</Text>
                             </View>
                         </View>
 
@@ -228,7 +228,7 @@ export default function LoginScreen() {
                             <FontAwesome name="star" size={14} color="#fff" style={{ marginRight: 8 }} />
                             <Text style={styles.loginButtonText}>Líder de Equipo</Text>
                         </TouchableOpacity>
-                        
+
                         <TouchableOpacity style={[styles.loginButton, { width: '100%', marginBottom: 12, backgroundColor: '#0e8ece' }]} onPress={async () => { setDevModalVisible(false); await bypassLoginForDev('asesor'); router.replace('/(tabs)/8-tablero-demo'); }}>
                             <FontAwesome name="user" size={14} color="#fff" style={{ marginRight: 8 }} />
                             <Text style={styles.loginButtonText}>Asesor Normal</Text>
