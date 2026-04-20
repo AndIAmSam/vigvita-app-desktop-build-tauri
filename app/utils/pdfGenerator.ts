@@ -146,6 +146,7 @@ export const generatePDF = async (data: any, type: "cliente" | "asesor") => {
                 <div style="font-size: 10px; margin-top: 5px; color: #555;">
                     <strong>${type === "asesor" ? "REPORTE INTERNO" : "REPORTE CLIENTE"}</strong> <br/>
                     Cliente: ${txt(data.nombreCliente)} <br/>
+                    Asesor: ${data.advisor?.nombre ? txt(data.advisor.nombre) : "______________________"} <br/>
                     ${today}
                 </div>
             </div>

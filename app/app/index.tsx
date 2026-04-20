@@ -1,7 +1,7 @@
 import React, { useState, useEffect, useRef } from 'react';
 import {
     View, Text, TextInput, TouchableOpacity, StyleSheet,
-    KeyboardAvoidingView, Platform, Animated, Image, Dimensions
+    KeyboardAvoidingView, Platform, Animated, Image, Dimensions, Linking, Modal
 } from 'react-native';
 import { useRouter } from 'expo-router';
 import { FontAwesome } from '@expo/vector-icons';
@@ -25,7 +25,7 @@ const COLORS = {
 
 export default function LoginScreen() {
     const router = useRouter();
-    const { login, isAuthenticated } = useFinancialData();
+    const { login, isAuthenticated, bypassLoginForDev } = useFinancialData();
 
     // Si ya está autenticado (y la sesión es válida), redirigir
     useEffect(() => {
@@ -37,6 +37,7 @@ export default function LoginScreen() {
     const [password, setPassword] = useState("");
     const [loading, setLoading] = useState(false);
     const [errorMessage, setErrorMessage] = useState("");
+    const [devModalVisible, setDevModalVisible] = useState(false);
 
     // Animaciones
     const fadeAnim = useRef(new Animated.Value(0)).current;
@@ -81,8 +82,7 @@ export default function LoginScreen() {
     };
 
     const handleForgotPassword = () => {
-        alert("Aquí iría a la pantalla de recuperación de contraseña.");
-        // router.push('/recovery');
+        Linking.openURL('https://vigvita.com.mx/forgot-password');
     };
 
     return (
@@ -169,9 +169,34 @@ export default function LoginScreen() {
                             </TouchableOpacity>
 
                             {/* Botón Olvidé Contraseña */}
-                            {/* <TouchableOpacity style={styles.forgotBtn} onPress={handleForgotPassword}>
+                            <TouchableOpacity style={styles.forgotBtn} onPress={handleForgotPassword}>
                                 <Text style={styles.forgotText}>¿Olvidaste tu contraseña?</Text>
-                            </TouchableOpacity> */}
+                            </TouchableOpacity>
+
+                            {/* Disclaimer de Privacidad y Términos */}
+                            <View style={styles.disclaimerContainer}>
+                                <Text style={styles.disclaimerText}>
+                                    Al iniciar sesión, aceptas nuestra{' '}
+                                    <Text style={styles.linkText} onPress={() => Linking.openURL('https://vigvita.com.mx/privacy-policy')}>
+                                        Política de Privacidad
+                                    </Text>
+                                    {' '}y nuestros{' '}
+                                    <Text style={styles.linkText} onPress={() => Linking.openURL('https://vigvita.com.mx/terms-and-conditions')}>
+                                        Términos y Condiciones de Uso
+                                    </Text>.
+                                </Text>
+                            </View>
+
+                            {/* DEV OVERRIDE BOTON */}
+                            {__DEV__ && (
+                                <TouchableOpacity
+                                    style={[styles.loginButton, { backgroundColor: '#f59e0b', marginTop: 20 }]}
+                                    onPress={() => setDevModalVisible(true)}
+                                >
+                                    <FontAwesome name="code" size={14} color="#fff" />
+                                    <Text style={styles.loginButtonText}>ENTRAR MODO DEV</Text>
+                                </TouchableOpacity>
+                            )}
 
                             {/* 3. FOOTER (SEGUNDO LOGO) */}
                             <View style={styles.footerInnerBlock}>
@@ -182,7 +207,7 @@ export default function LoginScreen() {
                                     style={styles.secondaryLogo}
                                     resizeMode="contain"
                                 />
-                                <Text style={styles.versionText}>v1.0.0</Text>
+                                <Text style={styles.versionText}>v1.0.12</Text>
                             </View>
                         </View>
 
@@ -190,6 +215,36 @@ export default function LoginScreen() {
 
                 </View>
             </KeyboardAvoidingView>
+
+            {/* MODAL DEV MODE */}
+            <Modal visible={devModalVisible} animationType="fade" transparent>
+                <View style={{ flex: 1, backgroundColor: 'rgba(0,0,0,0.5)', justifyContent: 'center', alignItems: 'center' }}>
+                    <View style={{ backgroundColor: '#fff', padding: 25, borderRadius: 20, width: '85%', alignItems: 'center', shadowColor: '#000', shadowOffset: { width: 0, height: 10 }, shadowOpacity: 0.1, shadowRadius: 20, elevation: 10 }}>
+                        <FontAwesome name="code" size={36} color="#f59e0b" style={{ marginBottom: 15 }} />
+                        <Text style={{ fontSize: 20, fontWeight: '900', marginBottom: 5 }}>Modo Desarrollador</Text>
+                        <Text style={{ fontSize: 13, color: '#6b7280', textAlign: 'center', marginBottom: 25 }}>Elige con qué rol deseas iniciar sesión localmente para pruebas.</Text>
+
+                        <TouchableOpacity style={[styles.loginButton, { width: '100%', marginBottom: 12, backgroundColor: '#2665ad' }]} onPress={async () => { setDevModalVisible(false); await bypassLoginForDev('lider'); router.replace('/(tabs)/8-tablero-demo'); }}>
+                            <FontAwesome name="star" size={14} color="#fff" style={{ marginRight: 8 }} />
+                            <Text style={styles.loginButtonText}>Líder de Equipo</Text>
+                        </TouchableOpacity>
+                        
+                        <TouchableOpacity style={[styles.loginButton, { width: '100%', marginBottom: 12, backgroundColor: '#0e8ece' }]} onPress={async () => { setDevModalVisible(false); await bypassLoginForDev('asesor'); router.replace('/(tabs)/8-tablero-demo'); }}>
+                            <FontAwesome name="user" size={14} color="#fff" style={{ marginRight: 8 }} />
+                            <Text style={styles.loginButtonText}>Asesor Normal</Text>
+                        </TouchableOpacity>
+
+                        <TouchableOpacity style={[styles.loginButton, { width: '100%', marginBottom: 25, backgroundColor: '#e11d48' }]} onPress={async () => { setDevModalVisible(false); await bypassLoginForDev('training'); router.replace('/(tabs)/8-tablero-demo'); }}>
+                            <FontAwesome name="graduation-cap" size={14} color="#fff" style={{ marginRight: 8 }} />
+                            <Text style={styles.loginButtonText}>Asesor en Capacitación</Text>
+                        </TouchableOpacity>
+
+                        <TouchableOpacity onPress={() => setDevModalVisible(false)} style={{ padding: 10 }}>
+                            <Text style={{ color: '#6b7280', fontWeight: 'bold' }}>Cancelar</Text>
+                        </TouchableOpacity>
+                    </View>
+                </View>
+            </Modal>
         </View>
     );
 }
@@ -262,6 +317,10 @@ const styles = StyleSheet.create({
 
     forgotBtn: { marginTop: 20, alignItems: 'center' },
     forgotText: { color: COLORS.azul1, fontSize: 13, fontWeight: '600' },
+
+    disclaimerContainer: { marginTop: 25, paddingHorizontal: 5 },
+    disclaimerText: { fontSize: 11, color: COLORS.textoGris, textAlign: 'center', lineHeight: 16 },
+    linkText: { color: COLORS.azul1, fontWeight: '600', textDecorationLine: 'underline' },
 
     // Footer
     footerInnerBlock: {

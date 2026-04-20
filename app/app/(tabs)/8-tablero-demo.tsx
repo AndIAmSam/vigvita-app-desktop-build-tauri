@@ -28,7 +28,8 @@ export default function TableroCopiaScreen() {
     const {
         advisor, logout, showAlert,
         nombreCliente, guardarProspecto, listaClientes, cargarProspecto, borrarCliente, nuevoAnalisis, actualizarEstadoProspecto,
-        importarRespaldo, forceSync
+        importarRespaldo, forceSync, currentClientId, cita,
+        isLider, equipoLider, asesorSeleccionadoGlobal, setAsesorSeleccionadoGlobal
     } = useFinancialData();
 
     const [searchText, setSearchText] = useState("");
@@ -46,11 +47,15 @@ export default function TableroCopiaScreen() {
     const [modalClient, setModalClient] = useState<ClienteGuardado | null>(null);
     const [modalEstadoSel, setModalEstadoSel] = useState<'en_espera' | 'descartado' | 'cierre'>('en_espera');
     const [modalPolizasSel, setModalPolizasSel] = useState<string[]>([]);
+    const [citaAgendadaBloqueada, setCitaAgendadaBloqueada] = useState(false);
 
     // --- ESTADOS DE CONFIRMACIÓN (NUEVO) ---
     const [confirmVisible, setConfirmVisible] = useState(false);
     const [confirmMessage, setConfirmMessage] = useState("");
     const [confirmAction, setConfirmAction] = useState<(() => void) | null>(null);
+
+    // --- ESTADO LÍDER DE EQUIPO (Manejado por Contexto) ---
+    const [modalAsesoresVisible, setModalAsesoresVisible] = useState(false);
 
     const fadeAnim = useRef(new Animated.Value(0)).current;
     const slideAnim = useRef(new Animated.Value(50)).current;
@@ -235,7 +240,28 @@ export default function TableroCopiaScreen() {
         }
     };
     const handleLogout = () => confirmarAccion("¿Estás seguro de que deseas cerrar sesión?", async () => { await logout(); router.replace('/'); });
-    const handleGuardar = async () => { if (!nombreCliente || !nombreCliente.trim()) { showAlert("Registra un nombre."); return; } await guardarProspecto(); };
+    const handleGuardar = async () => {
+        if (!nombreCliente || !nombreCliente.trim()) {
+            showAlert("Registra un nombre.");
+            return;
+        }
+
+        let cToOpen: ClienteGuardado | undefined;
+        if (currentClientId) {
+            cToOpen = listaClientes.find((c: any) => c.id === currentClientId);
+        }
+
+        const draftProspecto: ClienteGuardado = cToOpen || {
+            id: 'NUEVO_DRAFT_PENDING',
+            nombre: nombreCliente,
+            fechaCreacion: new Date().toLocaleDateString("es-MX"),
+            estatusAdquisicion: 'en_espera',
+            sincronizado: false,
+            data: {}
+        };
+
+        abrirModalEstado(draftProspecto);
+    };
     const handleLimpiar = () => confirmarAccion("¿Iniciar nuevo prospecto?", nuevoAnalisis);
     const handleCargar = (c: any) => confirmarAccion(`¿Cargar "${c.nombre}"?`, () => cargarProspecto(c));
     const handleBorrar = (id: string) => confirmarAccion("¿Borrar?", () => borrarCliente(id));
@@ -243,8 +269,17 @@ export default function TableroCopiaScreen() {
     // --- GESTIÓN DE ESTATUS Y MODAL ---
     const abrirModalEstado = (c: ClienteGuardado) => {
         setModalClient(c);
+
+        let hasAppointment = false;
+        if (c.id === 'NUEVO_DRAFT_PENDING' || c.id === currentClientId) {
+            hasAppointment = !!(cita?.dia || cita?.mes || cita?.hora);
+        } else {
+            hasAppointment = !!(c.data?.cita?.dia || c.data?.cita?.mes || c.data?.cita?.hora);
+        }
+        setCitaAgendadaBloqueada(hasAppointment);
+
         // Cargar valores actuales o default fallback (legacy)
-        const estadoActual = c.estatusAdquisicion || (c.estatusCierre ? 'cierre' : 'en_espera');
+        const estadoActual = hasAppointment ? 'cierre' : (c.estatusAdquisicion || (c.estatusCierre ? 'cierre' : 'en_espera'));
         setModalEstadoSel(estadoActual);
         setModalPolizasSel(c.tiposCierre || (c.tipoCierre ? [c.tipoCierre] : []));
         Animated.spring(modalSlideAnim, { toValue: 0, friction: 8, useNativeDriver: true }).start();
@@ -255,6 +290,7 @@ export default function TableroCopiaScreen() {
             setModalClient(null);
             setModalEstadoSel('en_espera');
             setModalPolizasSel([]);
+            setCitaAgendadaBloqueada(false);
         });
     };
 
@@ -265,7 +301,7 @@ export default function TableroCopiaScreen() {
         });
     };
 
-    const confirmarCambioEstado = () => {
+    const confirmarCambioEstado = async () => {
         if (modalClient) {
             // Validar que si eligió "cierre" se haya seleccionado al menos 1 póliza
             if (modalEstadoSel === 'cierre' && modalPolizasSel.length === 0) {
@@ -273,8 +309,20 @@ export default function TableroCopiaScreen() {
                 return;
             }
 
-            actualizarEstadoProspecto(modalClient.id, modalEstadoSel, modalEstadoSel === 'cierre' ? modalPolizasSel : []);
-            cerrarModalEstado();
+            if (modalClient.id === 'NUEVO_DRAFT_PENDING') {
+                // Interrumpe y ejecuta el guardado inicial enviando su estado
+                await guardarProspecto(modalEstadoSel, modalEstadoSel === 'cierre' ? modalPolizasSel : []);
+                cerrarModalEstado();
+            } else if (modalClient.id === currentClientId) {
+                // Es el prospecto activo ya guardado, actualizamos el estado del contexto e inmediatamente guardamos los datos crudos consolidados
+                actualizarEstadoProspecto(modalClient.id, modalEstadoSel, modalEstadoSel === 'cierre' ? modalPolizasSel : []);
+                await guardarProspecto(modalEstadoSel, modalEstadoSel === 'cierre' ? modalPolizasSel : []);
+                cerrarModalEstado();
+            } else {
+                // Modificando desde la base de abajo un histórico
+                actualizarEstadoProspecto(modalClient.id, modalEstadoSel, modalEstadoSel === 'cierre' ? modalPolizasSel : []);
+                cerrarModalEstado();
+            }
         }
     };
 
@@ -297,7 +345,18 @@ export default function TableroCopiaScreen() {
                 {/* HEADER */}
                 <Animated.View style={{ opacity: fadeAnim, transform: [{ translateY: slideAnim }], width: '100%', alignItems: 'center' }}>
 
-                    {/* BANNER DEMO */}
+                    {/* BANNER CAPACITACION */}
+                    {advisor?.training && (
+                        <View style={{ backgroundColor: '#fff1f2', borderColor: '#fda4af', borderWidth: 1, padding: 16, borderRadius: 12, width: '100%', marginBottom: 16, shadowColor: '#f43f5e', shadowOffset: { width: 0, height: 4 }, shadowOpacity: 0.1, shadowRadius: 8, elevation: 3 }}>
+                            <View style={{ flexDirection: 'row', alignItems: 'center', marginBottom: 8 }}>
+                                <FontAwesome name="graduation-cap" size={18} color="#e11d48" style={{ marginRight: 8 }} />
+                                <Text style={{ color: '#be123c', fontWeight: 'bold', fontSize: 16 }}>Modo de Capacitación Activo</Text>
+                            </View>
+                            <Text style={{ color: '#9f1239', fontSize: 13, lineHeight: 18 }}>
+                                Tus ADNs creados aquí no se enviarán a ningún servidor, se quedan en local solamente. Esto no contabilizará para tus métricas o progreso. Este espacio es para que practiques libremente.
+                            </Text>
+                        </View>
+                    )}
 
                     <View style={styles.headerContainer}>
                         {/* Fila Top: Logos Centrados Matemáticamente */}
@@ -342,6 +401,17 @@ export default function TableroCopiaScreen() {
                     <View style={styles.clientDisplay}>
                         <Text style={styles.clientLabel}>CLIENTE ACTUAL</Text>
                         {nombreCliente ? <Text style={styles.clientNameBig}>{nombreCliente}</Text> : <Text style={styles.clientNamePlaceholder}>-- Vacío --</Text>}
+                        {asesorSeleccionadoGlobal && (
+                            <View style={{ backgroundColor: '#e0f2fe', paddingVertical: 6, paddingHorizontal: 12, borderRadius: 20, marginTop: 10, flexDirection: 'row', alignItems: 'center', borderWidth: 1, borderColor: '#bae6fd' }}>
+                                <FontAwesome name="info-circle" size={14} color={COLORS.azul1} style={{ marginRight: 6 }} />
+                                <Text style={{ fontSize: 12, color: COLORS.azul1, fontWeight: 'bold' }}>
+                                    Prospecto para: {asesorSeleccionadoGlobal.nombre}
+                                </Text>
+                                <TouchableOpacity onPress={() => setAsesorSeleccionadoGlobal(null)} style={{ marginLeft: 10 }}>
+                                    <FontAwesome name="times-circle" size={16} color={COLORS.azul1} />
+                                </TouchableOpacity>
+                            </View>
+                        )}
                     </View>
                     <View style={styles.actionButtonsRow}>
                         <TouchableOpacity style={[styles.btnAction, { backgroundColor: COLORS.negro }]} onPress={handleGuardar}>
@@ -353,6 +423,17 @@ export default function TableroCopiaScreen() {
                             <Text style={[styles.btnText2, { color: COLORS.negro }]}>Nuevo</Text>
                         </TouchableOpacity>
                     </View>
+                    {isLider && (
+                        <View style={{ marginTop: 15, width: '100%', flexDirection: 'row', justifyContent: 'center' }}>
+                            <TouchableOpacity
+                                style={[styles.btnAction, { backgroundColor: COLORS.azul1, borderWidth: 1, borderColor: '#1e3a8a' }]}
+                                onPress={() => setModalAsesoresVisible(true)}
+                            >
+                                <FontAwesome name="group" size={16} color="#fff" style={{ marginRight: 8 }} />
+                                <Text style={styles.btnText1}>Nuevo ADN para otro asesor</Text>
+                            </TouchableOpacity>
+                        </View>
+                    )}
                 </Animated.View>
 
                 {/* HISTORIAL */}
@@ -405,7 +486,7 @@ export default function TableroCopiaScreen() {
                             )}
 
                             {currentItems.map((cliente, index) => (
-                                <AnimatedClientRow key={cliente.id} cliente={cliente} index={index} onLoad={handleCargar} onDelete={handleBorrar} onAbrirModalEstado={abrirModalEstado} />
+                                <AnimatedClientRow key={cliente.id} cliente={cliente} index={index} onLoad={handleCargar} onDelete={handleBorrar} onAbrirModalEstado={abrirModalEstado} isLider={isLider} />
                             ))}
 
                             {totalPages > 1 && (
@@ -491,43 +572,70 @@ export default function TableroCopiaScreen() {
                         </View>
 
                         <Text style={styles.optionsLabelCierre}>SELECCIONA EL ESTADO</Text>
+                        {citaAgendadaBloqueada && (
+                            <View style={{ backgroundColor: '#eff6ff', padding: 12, borderRadius: 12, marginBottom: 20, borderWidth: 1, borderColor: '#bfdbfe' }}>
+                                <View style={{ flexDirection: 'row', alignItems: 'center', marginBottom: 4 }}>
+                                    <FontAwesome name="calendar-check-o" size={14} color="#2563eb" style={{ marginRight: 6 }} />
+                                    <Text style={{ fontSize: 11, fontWeight: 'bold', color: '#1d4ed8' }}>Cita Agendada ("Cierre")</Text>
+                                </View>
+                                <Text style={{ fontSize: 11, color: '#1e3a8a', lineHeight: 16 }}>
+                                    Puesto que has registrado una fecha para agendar una cita en la propuesta, este prospecto se clasifica automáticamente como "Cierre".
+                                </Text>
+                            </View>
+                        )}
                         <View style={{ flexDirection: 'row', gap: 10, marginBottom: 20 }}>
                             <TouchableOpacity
-                                style={[styles.btnEstadoSelector, modalEstadoSel === 'en_espera' && styles.btnEstadoSelectorActivo]}
+                                disabled={citaAgendadaBloqueada}
+                                style={[styles.btnEstadoSelector, modalEstadoSel === 'en_espera' && styles.btnEstadoSelectorActivo, citaAgendadaBloqueada && modalEstadoSel !== 'en_espera' && { opacity: 0.4 }]}
                                 onPress={() => setModalEstadoSel('en_espera')}>
                                 <Text style={[styles.btnEstadoText, modalEstadoSel === 'en_espera' && { color: COLORS.blanco }]}>En Espera</Text>
                             </TouchableOpacity>
                             <TouchableOpacity
-                                style={[styles.btnEstadoSelector, modalEstadoSel === 'descartado' && styles.btnEstadoSelectorActivoDesc]}
+                                disabled={citaAgendadaBloqueada}
+                                style={[styles.btnEstadoSelector, modalEstadoSel === 'descartado' && styles.btnEstadoSelectorActivoDesc, citaAgendadaBloqueada && modalEstadoSel !== 'descartado' && { opacity: 0.4 }]}
                                 onPress={() => setModalEstadoSel('descartado')}>
                                 <Text style={[styles.btnEstadoText, modalEstadoSel === 'descartado' && { color: COLORS.blanco }]}>Descartado</Text>
                             </TouchableOpacity>
                             <TouchableOpacity
-                                style={[styles.btnEstadoSelector, modalEstadoSel === 'cierre' && styles.btnEstadoSelectorActivoCierre]}
+                                disabled={citaAgendadaBloqueada}
+                                style={[styles.btnEstadoSelector, modalEstadoSel === 'cierre' && styles.btnEstadoSelectorActivoCierre, citaAgendadaBloqueada && modalEstadoSel !== 'cierre' && { opacity: 0.4 }]}
                                 onPress={() => setModalEstadoSel('cierre')}>
                                 <Text style={[styles.btnEstadoText, modalEstadoSel === 'cierre' && { color: COLORS.blanco }]}>Cierre</Text>
                             </TouchableOpacity>
                         </View>
 
                         {modalEstadoSel === 'cierre' && (
-                            <View style={styles.optionsContainerCierre}>
-                                <Text style={styles.optionsLabelCierre}>¿QUÉ PÓLIZAS SE VENDIERON? (Selección Múltiple)</Text>
+                            <>
+                                {!citaAgendadaBloqueada && (
+                                    <View style={{ backgroundColor: '#fffbeb', padding: 12, borderRadius: 12, marginTop: -5, marginBottom: 15, borderWidth: 1, borderColor: '#fde68a' }}>
+                                        <View style={{ flexDirection: 'row', alignItems: 'center', marginBottom: 4 }}>
+                                            <FontAwesome name="info-circle" size={14} color="#f59e0b" style={{ marginRight: 6 }} />
+                                            <Text style={{ fontSize: 11, fontWeight: 'bold', color: '#b45309' }}>Aviso importante</Text>
+                                        </View>
+                                        <Text style={{ fontSize: 11, color: '#b45309', lineHeight: 16 }}>
+                                            Seleccionar "Cierre" indica que se agendó una <Text style={{ fontWeight: 'bold' }}>cita de cierre</Text>. No significa que la venta se haya concretado todavía.
+                                        </Text>
+                                    </View>
+                                )}
+                                <View style={styles.optionsContainerCierre}>
+                                    <Text style={styles.optionsLabelCierre}>Selecciona el tipo de póliza (una o más)</Text>
 
-                                <TouchableOpacity style={[styles.btnCierreOption, modalPolizasSel.includes('Vida') && styles.btnCierreOptionSelected]} onPress={() => togglePolizaSelection('Vida')}>
-                                    <FontAwesome name={modalPolizasSel.includes('Vida') ? "check-square" : "square-o"} size={16} color={modalPolizasSel.includes('Vida') ? COLORS.azul1 : "#d1d5db"} style={{ marginRight: 12 }} />
-                                    <Text style={styles.btnCierreText}>Vida</Text>
-                                </TouchableOpacity>
+                                    <TouchableOpacity style={[styles.btnCierreOption, modalPolizasSel.includes('Vida') && styles.btnCierreOptionSelected]} onPress={() => togglePolizaSelection('Vida')}>
+                                        <FontAwesome name={modalPolizasSel.includes('Vida') ? "check-square" : "square-o"} size={16} color={modalPolizasSel.includes('Vida') ? COLORS.azul1 : "#d1d5db"} style={{ marginRight: 12 }} />
+                                        <Text style={styles.btnCierreText}>Vida</Text>
+                                    </TouchableOpacity>
 
-                                <TouchableOpacity style={[styles.btnCierreOption, modalPolizasSel.includes('GMM') && styles.btnCierreOptionSelected]} onPress={() => togglePolizaSelection('GMM')}>
-                                    <FontAwesome name={modalPolizasSel.includes('GMM') ? "check-square" : "square-o"} size={16} color={modalPolizasSel.includes('GMM') ? COLORS.azul1 : "#d1d5db"} style={{ marginRight: 12 }} />
-                                    <Text style={styles.btnCierreText}>Gastos Médicos Mayores</Text>
-                                </TouchableOpacity>
+                                    <TouchableOpacity style={[styles.btnCierreOption, modalPolizasSel.includes('GMM') && styles.btnCierreOptionSelected]} onPress={() => togglePolizaSelection('GMM')}>
+                                        <FontAwesome name={modalPolizasSel.includes('GMM') ? "check-square" : "square-o"} size={16} color={modalPolizasSel.includes('GMM') ? COLORS.azul1 : "#d1d5db"} style={{ marginRight: 12 }} />
+                                        <Text style={styles.btnCierreText}>Gastos Médicos Mayores</Text>
+                                    </TouchableOpacity>
 
-                                <TouchableOpacity style={[styles.btnCierreOption, modalPolizasSel.includes('Primordial') && styles.btnCierreOptionSelected]} onPress={() => togglePolizaSelection('Primordial')}>
-                                    <FontAwesome name={modalPolizasSel.includes('Primordial') ? "check-square" : "square-o"} size={16} color={modalPolizasSel.includes('Primordial') ? COLORS.azul1 : "#d1d5db"} style={{ marginRight: 12 }} />
-                                    <Text style={styles.btnCierreText}>Primordial</Text>
-                                </TouchableOpacity>
-                            </View>
+                                    <TouchableOpacity style={[styles.btnCierreOption, modalPolizasSel.includes('Primordial') && styles.btnCierreOptionSelected]} onPress={() => togglePolizaSelection('Primordial')}>
+                                        <FontAwesome name={modalPolizasSel.includes('Primordial') ? "check-square" : "square-o"} size={16} color={modalPolizasSel.includes('Primordial') ? COLORS.azul1 : "#d1d5db"} style={{ marginRight: 12 }} />
+                                        <Text style={styles.btnCierreText}>Primordial</Text>
+                                    </TouchableOpacity>
+                                </View>
+                            </>
                         )}
 
                         <TouchableOpacity style={[styles.btnAction, { backgroundColor: COLORS.negro, marginTop: 25 }]} onPress={confirmarCambioEstado}>
@@ -569,12 +677,54 @@ export default function TableroCopiaScreen() {
                     </View>
                 </View>
             </Modal>
+
+            {/* MODAL SELECCIÓN ASESOR */}
+            <Modal visible={modalAsesoresVisible} animationType="fade" transparent>
+                <View style={styles.modalOverlay}>
+                    <View style={[styles.modalContent, { padding: 25, alignItems: 'center' }]}>
+                        <View style={{ width: 60, height: 60, borderRadius: 30, backgroundColor: '#e0f2fe', justifyContent: 'center', alignItems: 'center', marginBottom: 20 }}>
+                            <FontAwesome name="group" size={28} color={COLORS.azul1} />
+                        </View>
+                        <Text style={{ fontSize: 18, fontWeight: 'bold', color: COLORS.negro, marginBottom: 5 }}>Seleccionar Asesor</Text>
+                        <Text style={{ fontSize: 13, color: COLORS.textoGris, textAlign: 'center', marginBottom: 20 }}>Elige un asesor de tu equipo para este nuevo ADN</Text>
+
+                        <View style={{ width: '100%', maxHeight: 200, marginBottom: 20 }}>
+                            <ScrollView>
+                                {equipoLider.map((miembro: any) => (
+                                    <TouchableOpacity
+                                        key={miembro.id}
+                                        style={[{ width: '100%', padding: 15, borderRadius: 10, backgroundColor: COLORS.grisInput, marginBottom: 10, flexDirection: 'row', alignItems: 'center' }, asesorSeleccionadoGlobal?.id === miembro.id && { backgroundColor: COLORS.azul1 }]}
+                                        onPress={() => {
+                                            setModalAsesoresVisible(false);
+                                            setTimeout(() => {
+                                                confirmarAccion(`¿Iniciar un nuevo prospecto para ${miembro.nombre}?`, () => {
+                                                    setAsesorSeleccionadoGlobal(miembro);
+                                                    nuevoAnalisis();
+                                                });
+                                            }, 150); // Pequeño delay para asegurar que el primer Modal termine de cerrarse
+                                        }}
+                                    >
+                                        <FontAwesome name="user" size={16} color={asesorSeleccionadoGlobal?.id === miembro.id ? '#fff' : COLORS.textoGris} style={{ marginRight: 15 }} />
+                                        <Text style={[{ fontSize: 15, fontWeight: '600', color: COLORS.negro }, asesorSeleccionadoGlobal?.id === miembro.id && { color: '#fff' }]}>{miembro.nombre}</Text>
+                                    </TouchableOpacity>
+                                ))}
+                            </ScrollView>
+                        </View>
+
+                        <TouchableOpacity
+                            style={{ width: '100%', paddingVertical: 14, borderRadius: 12, backgroundColor: '#f3f4f6', alignItems: 'center' }}
+                            onPress={() => setModalAsesoresVisible(false)}>
+                            <Text style={{ fontWeight: 'bold', color: COLORS.textoGris, fontSize: 15 }}>Cancelar</Text>
+                        </TouchableOpacity>
+                    </View>
+                </View>
+            </Modal>
         </View>
     );
 }
 
 // --- ROW COMPONENT (ACTUALIZADO 3 ESTADOS) ---
-const AnimatedClientRow = ({ cliente, index, onLoad, onDelete, onAbrirModalEstado }: any) => {
+const AnimatedClientRow = ({ cliente, index, onLoad, onDelete, onAbrirModalEstado, isLider }: any) => {
     const rowOp = useRef(new Animated.Value(0)).current;
     useEffect(() => { Animated.timing(rowOp, { toValue: 1, duration: 400, delay: index * 50, useNativeDriver: Platform.OS !== 'web' }).start(); }, []);
 
@@ -612,6 +762,16 @@ const AnimatedClientRow = ({ cliente, index, onLoad, onDelete, onAbrirModalEstad
                                 <Text style={styles.badgeCierreText}>{p}</Text>
                             </View>
                         ))}
+
+                        {/* VISUAL: Mostrar el asesor asignado si es líder (Desde BD/Contexto) */}
+                        {isLider && cliente.asesorAsignado && (
+                            <View style={{ backgroundColor: '#f3f4f6', paddingHorizontal: 6, paddingVertical: 2, borderRadius: 4, marginLeft: 8, flexDirection: 'row', alignItems: 'center', borderWidth: 1, borderColor: '#e5e7eb' }}>
+                                <FontAwesome name="user" size={10} color={COLORS.textoGris} style={{ marginRight: 4 }} />
+                                <Text style={{ fontSize: 10, color: COLORS.textoGris, fontStyle: 'italic', fontWeight: 'bold' }}>
+                                    hecho para: {cliente.asesorAsignado.nombre}
+                                </Text>
+                            </View>
+                        )}
                     </View>
                 </View>
             </View>

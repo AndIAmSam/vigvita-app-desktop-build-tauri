@@ -37,6 +37,7 @@ export default function JubilacionScreen() {
   const card1Anim = useRef(new Animated.Value(100)).current;
   const card2Anim = useRef(new Animated.Value(100)).current;
   const card3Anim = useRef(new Animated.Value(100)).current;
+  const card4Anim = useRef(new Animated.Value(100)).current;
 
   useEffect(() => {
     // 1. Header
@@ -54,7 +55,7 @@ export default function JubilacionScreen() {
     ]).start();
 
     // 2. Tarjetas en Cascada
-    const cards = [card1Anim, card2Anim, card3Anim];
+    const cards = [card1Anim, card2Anim, card3Anim, card4Anim];
     const animations = cards.map((anim) =>
       Animated.spring(anim, {
         toValue: 0,
@@ -90,6 +91,22 @@ export default function JubilacionScreen() {
   const tasaInflacion = 0.04;
   const capitalTotalFuturo =
     capitalTotal * Math.pow(1 + tasaInflacion, yearsParaRetiro);
+
+  // --- LÓGICA AGREGADA: IMPACTO A FUTURO Y RENDIMIENTO (5.1%) ---
+  const mesesRetiro = duracionRetiro * 12;
+  const montoMensualFuturos = mesesRetiro > 0 ? capitalTotalFuturo / mesesRetiro : 0;
+
+  const calculatePV = (rate: number, nper: number, pmt: number) => {
+    if (rate === 0) return -pmt * nper;
+    return -pmt * ((1 - Math.pow(1 + rate, -nper)) / rate);
+  };
+
+  const tasaRendimientoRetiro = 0.051; // 5.1%
+  const ahorroMetaReal = calculatePV(
+    tasaRendimientoRetiro / 12,
+    mesesRetiro,
+    -montoMensualFuturos
+  );
 
   // 5. Ahorro Anual Necesario (Nota: Se pidió no modificar esto a futuro, se queda con el cálculo base o lo que definas, aquí se mantiene la lógica original sobre el capital base, si quisieran sobre el futuro habría que cambiar 'capitalTotal' por 'capitalTotalFuturo')
   let ahorroAnualNecesario = 0;
@@ -335,8 +352,49 @@ export default function JubilacionScreen() {
             </View>
           </AnimatedCard>
 
-          {/* TARJETA 3: EL PLAN DE AHORRO */}
+          {/* TARJETA 3: PROYECCIÓN Y RENDIMIENTO (NUEVA) */}
           <AnimatedCard anim={card3Anim} delay={400}>
+            <View style={styles.cardTitleRow}>
+              <FontAwesome
+                name="line-chart"
+                size={16}
+                color={COLORS.azul2}
+                style={{ marginRight: 8 }}
+              />
+              <Text style={styles.cardTitle}>Impacto a Futuro</Text>
+            </View>
+
+            <View style={{ marginBottom: 20 }}>
+              <Text style={styles.label}>
+                Pensión Mensual (Pesos Futuros)
+              </Text>
+              <View style={styles.readOnlyBox}>
+                <Text style={styles.readOnlyText}>
+                  {formatMoney(montoMensualFuturos)}
+                </Text>
+              </View>
+              <Text style={styles.helperText}>
+                Equivalente a los {formatMoney(montoMensual)} tras la inflación
+              </Text>
+            </View>
+
+            <View style={styles.divider} />
+
+            <View style={{ alignItems: "center" }}>
+              <Text style={styles.summaryLabel}>
+                RESERVA REQUERIDA (CON 5.1% RENDIMIENTO)
+              </Text>
+              <Text style={styles.mediumTotal}>
+                {formatMoney(ahorroMetaReal)}
+              </Text>
+              <Text style={styles.summarySub}>
+                Capital exacto a reunir asumiendo que el dinero siga invertido al retirarte
+              </Text>
+            </View>
+          </AnimatedCard>
+
+          {/* TARJETA 4: EL PLAN DE AHORRO */}
+          <AnimatedCard anim={card4Anim} delay={600}>
             <View style={styles.cardTitleRow}>
               <FontAwesome
                 name="calculator"

@@ -21,6 +21,8 @@ export interface Advisor {
   nombre: string;
   email: string;
   token: string;
+  training?: boolean;
+  isLider?: boolean;
 }
 
 export interface Dependiente {
@@ -170,6 +172,7 @@ export interface ClienteGuardado {
   estatusAdquisicion?: "en_espera" | "descartado" | "cierre";
   tipoCierre?: string; // Legacy
   tiposCierre?: string[]; // Array de pólizas seleccionadas
+  asesorAsignado?: { id: string; nombre: string }; // NUEVO: Para funciones de líder
   sincronizado: boolean;
   data: any;
 }
@@ -186,6 +189,14 @@ interface FinancialData {
   logout: () => Promise<void>;
   validateSession: () => Promise<boolean>;
   isAuthenticated: boolean;
+  bypassLoginForDev: (role?: 'lider' | 'asesor' | 'training') => Promise<void>;
+
+  // NUEVO: Líder
+  isLider: boolean;
+  equipoLider: { id: string; nombre: string }[];
+  verificarLider: () => Promise<void>;
+  asesorSeleccionadoGlobal: { id: string, nombre: string } | null;
+  setAsesorSeleccionadoGlobal: (asesor: { id: string, nombre: string } | null) => void;
 
   // NUEVO: Sync
   syncStatus: SyncStatus;
@@ -259,9 +270,13 @@ interface FinancialData {
   updatePiramideOrder: (newOrder: any[]) => void;
 
   // Funciones CRM
-  guardarProspecto: () => Promise<void>;
+  guardarProspecto: (
+    estadoOverride?: "en_espera" | "descartado" | "cierre",
+    polizasOverride?: string[]
+  ) => Promise<void>;
   cargarProspecto: (cliente: ClienteGuardado) => void;
   listaClientes: ClienteGuardado[];
+  currentClientId: string | null;
   borrarCliente: (id: string) => Promise<void>;
   nuevoAnalisis: () => void;
 
@@ -396,6 +411,11 @@ export const FinancialProvider = ({ children }: { children: ReactNode }) => {
   const [isInitialized, setIsInitialized] = useState(false);
   const [advisor, setAdvisor] = useState<Advisor | null>(null);
   const [userName, setUserName] = useState(""); // Nombre visual (legacy)
+  
+  // LÍDER DE EQUIPO
+  const [isLider, setIsLider] = useState(false);
+  const [equipoLider, setEquipoLider] = useState<{id: string, nombre: string}[]>([]);
+  const [asesorSeleccionadoGlobal, setAsesorSeleccionadoGlobal] = useState<{id: string, nombre: string} | null>(null);
 
   // CRM
   const [nombreCliente, setNombreCliente] = useState("");
@@ -439,6 +459,56 @@ export const FinancialProvider = ({ children }: { children: ReactNode }) => {
   };
 
   // ELIMINADO: useEffect inicial duplicado que causaba Race Condition
+
+  // AUTO BACKUP DRAFT (Borrador Temporal)
+  useEffect(() => {
+    if (!isInitialized) return; // Solo autoguardamos una vez que la base de datos se cargó
+
+    const snapshot = {
+      currentClientId,
+      nombreCliente,
+      perfil,
+      hijos,
+      jubilacion,
+      activos,
+      pasivos,
+      seguros,
+      ingresos,
+      gastosBasicos,
+      gastosVariables,
+      fallecimiento,
+      detalle,
+      cita,
+      referidos,
+      notas,
+      piramideLevels,
+    };
+    
+    // Lo guardamos de manera asíncrona silenciosa
+    localforage.setItem("draft_prospect_v1", JSON.stringify(snapshot)).catch(e => {
+        console.error("Error auto-saving draft:", e);
+    });
+
+  }, [
+    isInitialized,
+    currentClientId,
+    nombreCliente,
+    perfil,
+    hijos,
+    jubilacion,
+    activos,
+    pasivos,
+    seguros,
+    ingresos,
+    gastosBasicos,
+    gastosVariables,
+    fallecimiento,
+    detalle,
+    cita,
+    referidos,
+    notas,
+    piramideLevels,
+  ]);
 
   // AUTO SYNC TRIGGER
   useEffect(() => {
@@ -754,6 +824,18 @@ export const FinancialProvider = ({ children }: { children: ReactNode }) => {
 
   // --- SYNC COMO JSON PURO ---
   const forceSync = async (overrideList?: ClienteGuardado[]): Promise<string> => {
+    // DEV MODE BYPASS: Evitar auto-sincronización y logouts forzados por token falso
+    if (advisor?.id === "DEV-MODE") {
+      setSyncStatus("synced");
+      return "✅ DEV-MODE: Guardado sólo local. Sincronización saltada.";
+    }
+
+    // CAPACITACIÓN BYPASS: Restricción absoluta para evitar enviar ADNs de prueba a la base de datos
+    if (advisor?.training) {
+      setSyncStatus("synced");
+      return "ℹ️ Modo Capacitación: El ADN se ha guardado en tu memoria local exitosamente. No se sincronizará a la nube para no alterar las métricas reales.";
+    }
+
     if (!isOnline) {
       showAlert("Sin conexión. Los datos se guardarán localmente.");
       return "ERROR: No hay internet. Los datos siguen locales.";
@@ -795,6 +877,10 @@ export const FinancialProvider = ({ children }: { children: ReactNode }) => {
 
         if (cliente.serverId) {
           payloadClient.id = cliente.serverId;
+        }
+
+        if (cliente.asesorAsignado?.id) {
+          payloadClient.advisor_id = cliente.asesorAsignado.id;
         }
 
         return payloadClient;
@@ -905,7 +991,7 @@ export const FinancialProvider = ({ children }: { children: ReactNode }) => {
 
           // Límite estricto de 7 días offline (7 * 24 * 60 * 60 * 1000 ms)
           const MAX_OFFLINE_MS = 7 * 24 * 60 * 60 * 1000;
-          
+
           if (sessionVersion !== APP_SESSION_VERSION) {
             console.warn(`Sesión antigua (v${sessionVersion}) detectada. Se requiere v${APP_SESSION_VERSION}. Forzando purga de credenciales.`);
             await localforage.removeItem("advisor_session");
@@ -931,6 +1017,36 @@ export const FinancialProvider = ({ children }: { children: ReactNode }) => {
         // 2. Cargar DB Local (Igual que antes)
         const storedDB = await localforage.getItem<string>("clientes_db");
         if (storedDB) setListaClientes(JSON.parse(storedDB));
+
+        // 3. Cargar Borrador (Draft Snapshot)
+        const storedDraft = await localforage.getItem<string>("draft_prospect_v1");
+        if (storedDraft) {
+          try {
+            const draftObj = JSON.parse(storedDraft);
+            if (draftObj.currentClientId !== undefined) setCurrentClientId(draftObj.currentClientId);
+            if (draftObj.nombreCliente) setNombreCliente(draftObj.nombreCliente);
+            if (draftObj.perfil) setPerfil(draftObj.perfil);
+            if (draftObj.hijos) setHijos(draftObj.hijos);
+            if (draftObj.jubilacion) setJubilacion(draftObj.jubilacion);
+            if (draftObj.activos) setActivos(draftObj.activos);
+            if (draftObj.pasivos) setPasivos(draftObj.pasivos);
+            if (draftObj.seguros) setSeguros(draftObj.seguros);
+            if (draftObj.ingresos) setIngresos(draftObj.ingresos);
+            if (draftObj.gastosBasicos) setGastosBasicos(draftObj.gastosBasicos);
+            if (draftObj.gastosVariables) setGastosVariables(draftObj.gastosVariables);
+            if (draftObj.fallecimiento) setFallecimiento(draftObj.fallecimiento);
+            if (draftObj.detalle) setDetalle(draftObj.detalle);
+            if (draftObj.cita) setCita(draftObj.cita);
+            if (draftObj.referidos) setReferidos(draftObj.referidos);
+            if (draftObj.notas) setNotas(draftObj.notas);
+            if (draftObj.piramideLevels) setPiramideLevels(draftObj.piramideLevels);
+            
+            // Avisar al usuario que se recuperó su borrador
+            showAlert("Borrador Recuperado: Se ha restaurado la información del prospecto que no habías guardado.");
+          } catch (e) {
+            console.error("Error parsing draft", e);
+          }
+        }
       } catch (e) {
         console.error("Error init", e);
       } finally {
@@ -966,6 +1082,7 @@ export const FinancialProvider = ({ children }: { children: ReactNode }) => {
           nombre: data.name || "", // Solo usar nombre del backend; vacío hasta que el backend lo devuelva
           email: email,
           token: data.token,
+          training: data.training === true, // Mapeo de bandera Trainee desde la base de datos
         };
 
         // Guardamos el objeto de sesión con la FECHA ACTUAL
@@ -1008,6 +1125,27 @@ export const FinancialProvider = ({ children }: { children: ReactNode }) => {
     }
   };
 
+  const bypassLoginForDev = async (role: 'lider' | 'asesor' | 'training' = 'asesor') => {
+    const devUser: Advisor = {
+      id: "DEV-MODE",
+      nombre: `Desarrollador (${role})`,
+      email: "dev@local.host",
+      token: "dev-fake-token",
+      training: role === 'training', // Seleccionado si pide testing de capacitación
+      isLider: role === 'lider', // Seleccionado si pide role líder
+    };
+
+    const sessionData = {
+      user: devUser,
+      loginTime: Date.now(),
+      sessionVersion: APP_SESSION_VERSION
+    };
+
+    setAdvisor(devUser);
+    setUserName(devUser.nombre);
+    await localforage.setItem("advisor_session", JSON.stringify(sessionData));
+  };
+
   const logout = async () => {
     setAdvisor(null);
     await localforage.removeItem("advisor_session");
@@ -1016,6 +1154,9 @@ export const FinancialProvider = ({ children }: { children: ReactNode }) => {
 
   const validateSession = async (): Promise<boolean> => {
     if (!advisor?.token) return false;
+
+    // DEV MODE BYPASS: Si es el usuario simulado de desarrollo, saltamos la validación
+    if (advisor.id === "DEV-MODE") return true;
 
     // Si no estamos en línea (simulador interno), no podemos validar, dejamos pasar.
     if (!isOnline) return true;
@@ -1035,12 +1176,12 @@ export const FinancialProvider = ({ children }: { children: ReactNode }) => {
       });
 
       // El middleware auth lanza 404/401 si el usuario fue borrado o si el token caducó.
-      if (response.status === 404 || response.status === 401 || response.status === 403 || response.status === 500) {
+      if (response.status === 404 || response.status === 401 || response.status === 403) {
         Alert.alert("Error de Autenticación", `El sevidor denegó tu sesión (Código: ${response.status}). Saliendo...`);
         await logout(); // Force logout inmediatamente
         return false;
       }
-      
+
       // Si la API responde 422 (Body empty) u otro código, la autenticación fue exitosa.
       if (response.status !== 422 && response.status !== 201 && response.status !== 200) {
         Alert.alert("Advertencia de Red", `Respuesta inusual: ${response.status}`);
@@ -1063,23 +1204,56 @@ export const FinancialProvider = ({ children }: { children: ReactNode }) => {
 
       return true;
     } catch (e: any) {
-      // Diferenciador infalible: ¿Es un error de Auth escondido por CORS, o me quedé sin internet?
-      try {
-        // Hacer ping a GOOGLE con modo no-cors. Esto NUNCA lanzará error de CORS. Solo fallará si no hay internet físico.
-        await fetch("https://www.google.com/favicon.ico", { mode: "no-cors", cache: "no-store" });
-        
-        // Si no arrojó catch, SI HAY INTERNET. Por lo tanto el fetch al API base falló por rechazo de Auth.
-        console.warn("Detección de Bloqueo por CORS: El token es inválido o el usuario no existe.");
-        await logout();
-        Alert.alert("Bloqueo de Seguridad", "Tu acceso ha sido revocado. Entrando en modo desconectado.");
-        return false;
-      } catch (offlineError) {
-        // Falló el ping a google. NO HAY INTERNET.
-        console.warn("Fallo real de red (Desconectado). Permitiendo acceso por caché.");
-        return true;
-      }
+      // Fallo de red genérico. Asumimos siempre que es un fallo de conexión al servidor 
+      // (ej. servidor caído, DNS, sin internet) para evitar falsos positivos de CORS 
+      // que cierren la sesión por accidente.
+      console.warn("Fallo en la red o servidor no disponible. Permitiendo acceso local por caché.", e?.message);
+      return true;
     }
   };
+
+  const verificarLider = async () => {
+    if (!advisor?.token) return;
+    
+    // DEV MODE BYPASS
+    if (advisor.id === "DEV-MODE") {
+      setIsLider(advisor.isLider === true);
+      if (advisor.isLider) {
+        setEquipoLider([{ id: '123e4567-e89b-12d3-a456-426614174000', nombre: 'Mock Asesor Dev' }]);
+      }
+      return;
+    }
+
+    if (!isOnline) {
+       // Si no hay red, podríamos confiar en un caché, pero si es online la verificamos en la nube
+       return;
+    }
+
+    try {
+      const API_BASE_URL = process.env.EXPO_PUBLIC_API_URL || "https://vigvita.com.mx";
+      const res = await fetch(`${API_BASE_URL}/api/team`, {
+        headers: { "Authorization": `Bearer ${advisor.token}` }
+      });
+      if (res.status === 200) {
+        const data = await res.json();
+        setIsLider(true);
+        setEquipoLider((data.data || []).map((m: any) => ({ id: m.id, nombre: m.name })));
+      } else {
+        setIsLider(false);
+        setEquipoLider([]);
+      }
+    } catch {
+       setIsLider(false);
+       setEquipoLider([]);
+    }
+  };
+
+  // Disparar verificación de líder cuando el usuario inicia sesión (o se carga de localforage)
+  useEffect(() => {
+    if (advisor) {
+      verificarLider();
+    }
+  }, [advisor]);
 
   // --- SETTERS ESTÁNDAR (Igual que antes) ---
   const updatePerfil = (f: keyof PerfilData, v: any) =>
@@ -1188,7 +1362,10 @@ export const FinancialProvider = ({ children }: { children: ReactNode }) => {
   // ==========================================
 
   // --- LÓGICA DE GUARDADO (Marca como NO SINCRONIZADO) ---
-  const guardarProspecto = async () => {
+  const guardarProspecto = async (
+    estadoOverride?: "en_espera" | "descartado" | "cierre",
+    polizasOverride?: string[]
+  ) => {
     if (!nombreCliente.trim()) {
       showAlert("Falta registrar un nombre.");
       return;
@@ -1218,29 +1395,35 @@ export const FinancialProvider = ({ children }: { children: ReactNode }) => {
       id: currentClientId || Date.now().toString(),
       nombre: nombreCliente,
       fechaCreacion: new Date().toLocaleDateString("es-MX"),
-      estatusAdquisicion: "en_espera",
-      tiposCierre: [],
-      sincronizado: false, // <--- SIEMPRE NACE FALSO (PENDIENTE DE SUBIR)
+      estatusAdquisicion: estadoOverride || "en_espera",
+      tiposCierre: polizasOverride || [],
+      asesorAsignado: asesorSeleccionadoGlobal || undefined,
+      sincronizado: advisor?.training ? true : false, // Los ADNs de práctica nacen 'sincronizados' para que el motor de red los ignore para siempre
       data: dataSnapshot,
     };
+    if (estadoOverride === "cierre") nuevoClienteObj.estatusCierre = true;
+    if (polizasOverride && polizasOverride.length > 0) nuevoClienteObj.tipoCierre = polizasOverride[0];
 
     // 2. Insertar o Actualizar
     if (currentClientId) {
       const index = nuevaLista.findIndex((c) => c.id === currentClientId);
       if (index >= 0) {
         // Mantenemos estatus anterior (legacy o nuevo), reseteamos sincronizado
-        nuevoClienteObj.estatusCierre = nuevaLista[index].estatusCierre;
-        nuevoClienteObj.tipoCierre = nuevaLista[index].tipoCierre;
+        nuevoClienteObj.estatusCierre = estadoOverride === "cierre" ? true : nuevaLista[index].estatusCierre;
+        nuevoClienteObj.tipoCierre = polizasOverride && polizasOverride.length > 0 ? polizasOverride[0] : nuevaLista[index].tipoCierre;
         nuevoClienteObj.estatusAdquisicion =
+          estadoOverride ||
           nuevaLista[index].estatusAdquisicion ||
           (nuevaLista[index].estatusCierre ? "cierre" : "en_espera");
         nuevoClienteObj.tiposCierre =
+          polizasOverride ||
           nuevaLista[index].tiposCierre ||
           (nuevaLista[index].tipoCierre ? [nuevaLista[index].tipoCierre] : []);
 
         // Preservar metadatos vitales para evitar duplicados en V3 y reseteo de fechas
         nuevoClienteObj.serverId = nuevaLista[index].serverId;
         nuevoClienteObj.fechaCreacion = nuevaLista[index].fechaCreacion;
+        nuevoClienteObj.asesorAsignado = nuevaLista[index].asesorAsignado; // Propiedad de líder
 
         nuevaLista[index] = nuevoClienteObj;
       } else {
@@ -1278,7 +1461,7 @@ export const FinancialProvider = ({ children }: { children: ReactNode }) => {
             | "descartado"
             | "cierre",
           tiposCierre: nuevoEstado && tipoCierre ? [tipoCierre] : [],
-          sincronizado: false,
+          sincronizado: advisor?.training ? true : false,
         };
       }
       return c;
@@ -1301,7 +1484,7 @@ export const FinancialProvider = ({ children }: { children: ReactNode }) => {
           estatusCierre: estadoEnums === "cierre", // Proxy for legacy
           tipoCierre:
             tiposPoliza && tiposPoliza.length > 0 ? tiposPoliza[0] : undefined, // Proxy for legacy
-          sincronizado: false,
+          sincronizado: advisor?.training ? true : false,
         };
       }
       return c;
@@ -1345,6 +1528,9 @@ export const FinancialProvider = ({ children }: { children: ReactNode }) => {
   };
 
   const nuevoAnalisis = (silencioso = false) => {
+    // Si reseteamos para un nuevo perfil, eliminamos el draft temporal
+    localforage.removeItem("draft_prospect_v1").catch(console.error);
+
     setCurrentClientId(null);
     setNombreCliente("");
     setPerfil(initialPerfil);
@@ -1363,7 +1549,7 @@ export const FinancialProvider = ({ children }: { children: ReactNode }) => {
     setNotas("");
     setPiramideLevels(INITIAL_PIRAMIDE_LEVELS);
     if (!silencioso) {
-      showAlert("Listo para nuevo prospecto. Sincronizando...");
+      showAlert("Listo para nuevo prospecto.");
     }
 
     // Auto-sync
@@ -1441,6 +1627,7 @@ export const FinancialProvider = ({ children }: { children: ReactNode }) => {
         logout,
         validateSession,
         isAuthenticated: !!advisor,
+        bypassLoginForDev,
         userName,
         setUserName: saveVendorName,
         nombreCliente,
@@ -1483,11 +1670,20 @@ export const FinancialProvider = ({ children }: { children: ReactNode }) => {
         guardarProspecto,
         cargarProspecto,
         listaClientes,
+        currentClientId,
         borrarCliente,
         nuevoAnalisis,
         toggleCierreProspecto,
         actualizarEstadoProspecto, // <--- Nueva función expuesta
         importarRespaldo, // <--- Para respaldos
+
+        // Líder de Equipo
+        isLider,
+        equipoLider,
+        verificarLider,
+        asesorSeleccionadoGlobal,
+        setAsesorSeleccionadoGlobal,
+
         addDependiente,
         updateDependiente,
         removeDependiente,
@@ -1530,6 +1726,8 @@ const ctxStyles = StyleSheet.create({
     backgroundColor: 'rgba(0,0,0,0.5)',
     justifyContent: 'center',
     alignItems: 'center',
+    zIndex: 999999,
+    elevation: 100,
   },
   modalContent: {
     width: '90%',
@@ -1542,7 +1740,8 @@ const ctxStyles = StyleSheet.create({
     shadowOffset: { width: 0, height: 10 },
     shadowOpacity: 0.25,
     shadowRadius: 10,
-    elevation: 10,
+    elevation: 100,
+    zIndex: 999999,
   },
   iconContainer: {
     width: 60,

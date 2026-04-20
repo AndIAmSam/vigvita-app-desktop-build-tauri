@@ -25,7 +25,7 @@ export default function ReferidosScreen() {
     nombreCliente, perfil, piramideLevels,
     hijos, jubilacion, activos, pasivos, seguros, ingresos,
     gastosBasicos, gastosVariables, fallecimiento, detalle,
-    cita, referidos, upsertReferido
+    cita, referidos, upsertReferido, advisor
   } = useFinancialData();
 
   const [loading, setLoading] = useState(false);
@@ -133,6 +133,7 @@ export default function ReferidosScreen() {
     const fullData = {
       nombreCliente, perfil, piramideLevels, hijos, jubilacion, activos, pasivos, seguros, ingresos,
       gastosBasicos, gastosVariables, fallecimiento, detalle, cita, referidos,
+      advisor,
       totales: {
         educacionAnual, duracionRetiro: duracion, importeAnualJub: montoAnualJub, faltanJub,
         jubilacionCapital: capitalJub, jubilacionCapitalFuturo: capitalJubFuturo, jubilacionAhorroAnual: ahorroAnualJub,

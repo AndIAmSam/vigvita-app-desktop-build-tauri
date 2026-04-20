@@ -212,10 +212,11 @@ export default function TabLayout() {
     // 1. Verificación inmediata al montar o cambiar ruta
     verifyAccess();
 
-    // 2. Verificación periódica (cada 15 segundos) por si el usuario se queda quieto
+    // 2. Verificación periódica (cada 5 minutos) por si el usuario se queda quieto
+    // Reducido de 15s a 300s para no asfixiar la conexión y evitar cierres abruptos por micro-cortes
     intervalId = setInterval(() => {
       verifyAccess();
-    }, 15000);
+    }, 300000);
 
     // 3. Verificación al traer la app del fondo (background -> active)
     const subscription = AppState.addEventListener("change", (nextAppState) => {
@@ -259,14 +260,14 @@ export default function TabLayout() {
         <Tabs.Screen name="9-notas" options={{ href: null }} />
       </Tabs>
 
-      {/* Indicador de última sincronización global flotante superior */}
-      {lastSyncTime && isOnline && syncStatus === 'synced' && (
+      {/* Indicador de última sincronización global flotante superior (Solo visible en tablero) */}
+      {pathname.includes('8-tablero-demo') && lastSyncTime && isOnline && syncStatus === 'synced' && (
         <View style={styles.syncIndicator}>
           <FontAwesome name="check-circle" size={10} color={COLORS.active} style={{ marginRight: 4 }} />
           <Text style={styles.syncIndicatorText}>Sincronizado: {lastSyncTime}</Text>
         </View>
       )}
-      {syncStatus === 'syncing' && isOnline && (
+      {pathname.includes('8-tablero-demo') && syncStatus === 'syncing' && isOnline && (
         <View style={styles.syncIndicator}>
           <FontAwesome name="refresh" size={10} color="#f59e0b" style={{ marginRight: 4 }} />
           <Text style={[styles.syncIndicatorText, { color: '#f59e0b' }]}>Sincronizando...</Text>
