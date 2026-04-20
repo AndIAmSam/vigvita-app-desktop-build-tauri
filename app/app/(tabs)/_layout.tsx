@@ -185,7 +185,7 @@ export default function TabLayout() {
   const showAdvisorBadge = advisor?.nombre && !pathname.includes('8-tablero-demo');
 
   // --- GUARDIÁN DE SESIÓN ACTIVO ---
-  // Se dispara al cambiar de pestaña, pero TAMBIÉN periódicamente cada 15 segundos y al volver a la app.
+  // Se dispara al montar, periódicamente cada 5 minutos, y al volver a la app.
   useEffect(() => {
     // Si el enrutador de Expo no ha terminado de montar la aplicación, o si localforage sigue leyendo la memoria, abortamos.
     // Esto evita: "Attempted to navigate before mounting the Root Layout component"
@@ -209,11 +209,11 @@ export default function TabLayout() {
       }
     };
 
-    // 1. Verificación inmediata al montar o cambiar ruta
+    // 1. Verificación inmediata al montar 
     verifyAccess();
 
     // 2. Verificación periódica (cada 5 minutos) por si el usuario se queda quieto
-    // Reducido de 15s a 300s para no asfixiar la conexión y evitar cierres abruptos por micro-cortes
+    // Reducido a 300s para no asfixiar la conexión y evitar cierres abruptos por Rate Limit 429
     intervalId = setInterval(() => {
       verifyAccess();
     }, 300000);
@@ -230,7 +230,7 @@ export default function TabLayout() {
       clearInterval(intervalId);
       subscription.remove();
     };
-  }, [pathname, advisor, rootNavigationState?.key, isInitialized]);
+  }, [advisor, rootNavigationState?.key, isInitialized]);
 
 
   return (

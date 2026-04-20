@@ -452,6 +452,7 @@ export const FinancialProvider = ({ children }: { children: ReactNode }) => {
   // --- ESTADOS DEL MODAL GLOBAL ---
   const [alertVisible, setAlertVisible] = useState(false);
   const [alertMessage, setAlertMessage] = useState("");
+  const [pendingDraftAlert, setPendingDraftAlert] = useState(false);
 
   const showAlert = (msg: string) => {
     setAlertMessage(msg);
@@ -463,6 +464,11 @@ export const FinancialProvider = ({ children }: { children: ReactNode }) => {
   // AUTO BACKUP DRAFT (Borrador Temporal)
   useEffect(() => {
     if (!isInitialized) return; // Solo autoguardamos una vez que la base de datos se cargó
+
+    // Ignorar guardado si el prospecto está completamente en blanco (ej. justo después de "Nuevo Análisis" o al arrancar por 1ra vez)
+    if (!currentClientId && !nombreCliente.trim() && !perfil.telefono.trim() && !perfil.ocupacion.trim()) {
+        return;
+    }
 
     const snapshot = {
       currentClientId,
@@ -1023,26 +1029,37 @@ export const FinancialProvider = ({ children }: { children: ReactNode }) => {
         if (storedDraft) {
           try {
             const draftObj = JSON.parse(storedDraft);
-            if (draftObj.currentClientId !== undefined) setCurrentClientId(draftObj.currentClientId);
-            if (draftObj.nombreCliente) setNombreCliente(draftObj.nombreCliente);
-            if (draftObj.perfil) setPerfil(draftObj.perfil);
-            if (draftObj.hijos) setHijos(draftObj.hijos);
-            if (draftObj.jubilacion) setJubilacion(draftObj.jubilacion);
-            if (draftObj.activos) setActivos(draftObj.activos);
-            if (draftObj.pasivos) setPasivos(draftObj.pasivos);
-            if (draftObj.seguros) setSeguros(draftObj.seguros);
-            if (draftObj.ingresos) setIngresos(draftObj.ingresos);
-            if (draftObj.gastosBasicos) setGastosBasicos(draftObj.gastosBasicos);
-            if (draftObj.gastosVariables) setGastosVariables(draftObj.gastosVariables);
-            if (draftObj.fallecimiento) setFallecimiento(draftObj.fallecimiento);
-            if (draftObj.detalle) setDetalle(draftObj.detalle);
-            if (draftObj.cita) setCita(draftObj.cita);
-            if (draftObj.referidos) setReferidos(draftObj.referidos);
-            if (draftObj.notas) setNotas(draftObj.notas);
-            if (draftObj.piramideLevels) setPiramideLevels(draftObj.piramideLevels);
             
-            // Avisar al usuario que se recuperó su borrador
-            showAlert("Borrador Recuperado: Se ha restaurado la información del prospecto que no habías guardado.");
+            const isEmptyDraft = !draftObj.currentClientId && 
+                                 !(draftObj.nombreCliente?.trim()) && 
+                                 !(draftObj.perfil?.telefono?.trim()) && 
+                                 !(draftObj.perfil?.ocupacion?.trim());
+
+            if (isEmptyDraft) {
+                // Borrar basura residual
+                localforage.removeItem("draft_prospect_v1");
+            } else {
+                if (draftObj.currentClientId !== undefined) setCurrentClientId(draftObj.currentClientId);
+                if (draftObj.nombreCliente) setNombreCliente(draftObj.nombreCliente);
+                if (draftObj.perfil) setPerfil(draftObj.perfil);
+                if (draftObj.hijos) setHijos(draftObj.hijos);
+                if (draftObj.jubilacion) setJubilacion(draftObj.jubilacion);
+                if (draftObj.activos) setActivos(draftObj.activos);
+                if (draftObj.pasivos) setPasivos(draftObj.pasivos);
+                if (draftObj.seguros) setSeguros(draftObj.seguros);
+                if (draftObj.ingresos) setIngresos(draftObj.ingresos);
+                if (draftObj.gastosBasicos) setGastosBasicos(draftObj.gastosBasicos);
+                if (draftObj.gastosVariables) setGastosVariables(draftObj.gastosVariables);
+                if (draftObj.fallecimiento) setFallecimiento(draftObj.fallecimiento);
+                if (draftObj.detalle) setDetalle(draftObj.detalle);
+                if (draftObj.cita) setCita(draftObj.cita);
+                if (draftObj.referidos) setReferidos(draftObj.referidos);
+                if (draftObj.notas) setNotas(draftObj.notas);
+                if (draftObj.piramideLevels) setPiramideLevels(draftObj.piramideLevels);
+                
+                // En vez de disparar el alert de inmediato, lo dejamos pendiente hasta que el usuario inicie sesión
+                setPendingDraftAlert(true);
+            }
           } catch (e) {
             console.error("Error parsing draft", e);
           }
@@ -1055,6 +1072,16 @@ export const FinancialProvider = ({ children }: { children: ReactNode }) => {
     };
     init();
   }, []);
+
+  // Mostrar la alerta de draft recuperado SOLO si ya están logueados
+  useEffect(() => {
+    if (advisor && pendingDraftAlert) {
+      setTimeout(() => {
+        showAlert("Borrador Recuperado: Se ha restaurado la información del prospecto que no habías guardado.");
+      }, 500); // Pequeño retraso para que ocurra después de cualquier transición de pantalla
+      setPendingDraftAlert(false);
+    }
+  }, [advisor, pendingDraftAlert]);
 
   // LOGIN (INTEGRADO CON BACKEND)
   const login = async (

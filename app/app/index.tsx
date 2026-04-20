@@ -207,7 +207,7 @@ export default function LoginScreen() {
                                     style={styles.secondaryLogo}
                                     resizeMode="contain"
                                 />
-                                <Text style={styles.versionText}>v1.0.15</Text>
+                                <Text style={styles.versionText}>v1.0.17</Text>
                             </View>
                         </View>
 
