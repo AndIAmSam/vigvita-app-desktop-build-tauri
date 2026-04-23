@@ -191,8 +191,8 @@ export default function PiramideScreen() {
 
             <View style={{ gap: 15 }}>
               <SimpleNoteArea
-                label="PROTECCIÓN"
-                placeholder="¿Qué pasaría si hoy faltaras? ¿Quién sufriría?"
+                label="CALIDAD Y ESTILO DE VIDA"
+                placeholder="¿Qué es lo más importante para ti?"
                 value={perfil.notaProteccion}
                 onChange={(t: string) => updatePerfil("notaProteccion", t)}
               />

@@ -205,6 +205,12 @@ interface FinancialData {
   toggleOnlineSimulation: () => void; // Para probar sin internet
   forceSync: () => Promise<string>; // Devuelve el JSON para ver qué manda
 
+  // NUEVO: Cloud Fetch
+  currentServerId: string | null;
+  listaNube: ClienteGuardado[];
+  isFetchingCloud: boolean;
+  fetchSincronizadosNube: () => Promise<void>;
+
   // Datos App
   userName: string;
   setUserName: (name: string) => void;
@@ -421,6 +427,9 @@ export const FinancialProvider = ({ children }: { children: ReactNode }) => {
   const [nombreCliente, setNombreCliente] = useState("");
   const [listaClientes, setListaClientes] = useState<ClienteGuardado[]>([]);
   const [currentClientId, setCurrentClientId] = useState<string | null>(null);
+  const [currentServerId, setCurrentServerId] = useState<string | null>(null);
+  const [listaNube, setListaNube] = useState<ClienteGuardado[]>([]);
+  const [isFetchingCloud, setIsFetchingCloud] = useState(false);
 
   // Estados Data
   const [perfil, setPerfil] = useState<PerfilData>(initialPerfil);
@@ -472,6 +481,7 @@ export const FinancialProvider = ({ children }: { children: ReactNode }) => {
 
     const snapshot = {
       currentClientId,
+      currentServerId,
       nombreCliente,
       perfil,
       hijos,
@@ -930,18 +940,18 @@ export const FinancialProvider = ({ children }: { children: ReactNode }) => {
         }
 
         setListaClientes((prev) => {
-          const listaActualizada = prev.map((c) => {
-            const syncIndex = clientesPendientes.findIndex(pend => pend.id === c.id);
-            if (syncIndex !== -1) {
-              // El cliente estaba pendiente y se mandó
-              const serverUuid = returnedUuids[syncIndex];
-              return {
-                ...c,
-                sincronizado: true,
-                serverId: serverUuid || c.serverId // Preservamos si ya tenía o cargamos el nuevo
-              };
+          // Si el prospecto recién sincronizado es el que está en pantalla, actualizamos currentServerId
+          clientesPendientes.forEach((pend, idx) => {
+            if (pend.id === currentClientId && returnedUuids[idx]) {
+               setCurrentServerId(returnedUuids[idx]);
             }
-            return c;
+          });
+
+          const listaActualizada = prev.filter((c) => {
+            const syncIndex = clientesPendientes.findIndex(pend => pend.id === c.id);
+            // Si el cliente estaba en la lista de pendientes y se mandó (syncIndex !== -1),
+            // lo REMOVEMOS de localforage. Si no estaba (ej. es draft local reciente), se queda.
+            return syncIndex === -1; 
           });
 
           // Persistimos dentro del updater de estado para asegurar la fuente de la verdad
@@ -967,6 +977,56 @@ export const FinancialProvider = ({ children }: { children: ReactNode }) => {
       setSyncStatus("pending");
       showAlert("Error de red al intentar sincronizar.");
       return "ERROR: Excepción durante la sincronización.";
+    }
+  };
+
+  const fetchSincronizadosNube = async () => {
+    if (!isOnline) {
+      showAlert("Sin conexión a internet. No se pueden cargar los prospectos de la nube.");
+      return;
+    }
+    if (!advisor?.token) return;
+
+    setIsFetchingCloud(true);
+    try {
+      const API_BASE_URL = process.env.EXPO_PUBLIC_API_URL || "https://vigvita.com.mx";
+      const response = await fetch(`${API_BASE_URL}/api/profiles`, {
+        method: "GET",
+        headers: {
+          "Authorization": `Bearer ${advisor.token}`
+        }
+      });
+
+      if (response.status === 401 || response.status === 403 || response.status === 404) {
+        await logout();
+        return;
+      }
+
+      if (response.ok) {
+        const json = await response.json();
+        const profiles = json.profiles || [];
+        
+        const mappedCloud = profiles.map((p: any) => {
+          return {
+            id: p.id,
+            serverId: p.id,
+            nombre: p.client_name,
+            fechaCreacion: new Date(p.created_at).toLocaleDateString("es-MX"),
+            estatusAdquisicion: p.status,
+            sincronizado: true, // Vienen de la nube
+            data: unmapClientData(p.data || {})
+          } as ClienteGuardado;
+        });
+
+        setListaNube(mappedCloud);
+      } else {
+        showAlert("No se pudieron obtener los datos de la nube.");
+      }
+    } catch (e) {
+      console.error("Error al obtener la nube:", e);
+      showAlert("Hubo un error de conexión al consultar la nube.");
+    } finally {
+      setIsFetchingCloud(false);
     }
   };
 
@@ -1040,6 +1100,7 @@ export const FinancialProvider = ({ children }: { children: ReactNode }) => {
                 localforage.removeItem("draft_prospect_v1");
             } else {
                 if (draftObj.currentClientId !== undefined) setCurrentClientId(draftObj.currentClientId);
+                if (draftObj.currentServerId !== undefined) setCurrentServerId(draftObj.currentServerId);
                 if (draftObj.nombreCliente) setNombreCliente(draftObj.nombreCliente);
                 if (draftObj.perfil) setPerfil(draftObj.perfil);
                 if (draftObj.hijos) setHijos(draftObj.hijos);
@@ -1092,7 +1153,8 @@ export const FinancialProvider = ({ children }: { children: ReactNode }) => {
       const API_BASE_URL =
         process.env.EXPO_PUBLIC_API_URL || "https://vigvita.com.mx";
 
-      const response = await fetch(`${API_BASE_URL}/api/login`, {
+      // Añadimos ?api=true como dicta la v8 para obtener training y is_leader
+      const response = await fetch(`${API_BASE_URL}/api/login?api=true`, {
         method: "POST",
         headers: {
           "Content-Type": "application/json",
@@ -1110,6 +1172,7 @@ export const FinancialProvider = ({ children }: { children: ReactNode }) => {
           email: email,
           token: data.token,
           training: data.training === true, // Mapeo de bandera Trainee desde la base de datos
+          isLider: data.is_leader === true, // Mapeo de bandera Leader (v8 API)
         };
 
         // Guardamos el objeto de sesión con la FECHA ACTUAL
@@ -1252,26 +1315,33 @@ export const FinancialProvider = ({ children }: { children: ReactNode }) => {
     }
 
     if (!isOnline) {
-       // Si no hay red, podríamos confiar en un caché, pero si es online la verificamos en la nube
+       // Si no hay red, confiamos en la propiedad cacheada en la sesión
+       setIsLider(advisor.isLider === true);
        return;
     }
 
-    try {
-      const API_BASE_URL = process.env.EXPO_PUBLIC_API_URL || "https://vigvita.com.mx";
-      const res = await fetch(`${API_BASE_URL}/api/team`, {
-        headers: { "Authorization": `Bearer ${advisor.token}` }
-      });
-      if (res.status === 200) {
-        const data = await res.json();
-        setIsLider(true);
-        setEquipoLider((data.data || []).map((m: any) => ({ id: m.id, nombre: m.name })));
-      } else {
-        setIsLider(false);
-        setEquipoLider([]);
+    // NUEVO ENFOQUE API V8:
+    // Evitamos pegarle al endpoint /api/team de forma innecesaria si el usuario no es líder,
+    // ahorrando ancho de banda y tiempos de carga.
+    if (advisor.isLider) {
+      setIsLider(true);
+      try {
+        const API_BASE_URL = process.env.EXPO_PUBLIC_API_URL || "https://vigvita.com.mx";
+        const res = await fetch(`${API_BASE_URL}/api/team`, {
+          headers: { "Authorization": `Bearer ${advisor.token}` }
+        });
+        if (res.status === 200) {
+          const data = await res.json();
+          setEquipoLider((data.data || []).map((m: any) => ({ id: m.id, nombre: m.name })));
+        } else {
+          setEquipoLider([]);
+        }
+      } catch {
+         setEquipoLider([]);
       }
-    } catch {
-       setIsLider(false);
-       setEquipoLider([]);
+    } else {
+      setIsLider(false);
+      setEquipoLider([]);
     }
   };
 
@@ -1420,6 +1490,7 @@ export const FinancialProvider = ({ children }: { children: ReactNode }) => {
     // 1. Crear Objeto Cliente
     const nuevoClienteObj: ClienteGuardado = {
       id: currentClientId || Date.now().toString(),
+      serverId: currentServerId || undefined,
       nombre: nombreCliente,
       fechaCreacion: new Date().toLocaleDateString("es-MX"),
       estatusAdquisicion: estadoOverride || "en_espera",
@@ -1448,7 +1519,7 @@ export const FinancialProvider = ({ children }: { children: ReactNode }) => {
           (nuevaLista[index].tipoCierre ? [nuevaLista[index].tipoCierre] : []);
 
         // Preservar metadatos vitales para evitar duplicados en V3 y reseteo de fechas
-        nuevoClienteObj.serverId = nuevaLista[index].serverId;
+        nuevoClienteObj.serverId = nuevaLista[index].serverId || currentServerId || undefined;
         nuevoClienteObj.fechaCreacion = nuevaLista[index].fechaCreacion;
         nuevoClienteObj.asesorAsignado = nuevaLista[index].asesorAsignado; // Propiedad de líder
 
@@ -1522,6 +1593,7 @@ export const FinancialProvider = ({ children }: { children: ReactNode }) => {
 
   const cargarProspecto = (cliente: ClienteGuardado) => {
     setCurrentClientId(cliente.id);
+    setCurrentServerId(cliente.serverId || null);
     const d = cliente.data;
     setNombreCliente(cliente.nombre);
     setPerfil(d.perfil || initialPerfil);
@@ -1559,6 +1631,7 @@ export const FinancialProvider = ({ children }: { children: ReactNode }) => {
     localforage.removeItem("draft_prospect_v1").catch(console.error);
 
     setCurrentClientId(null);
+    setCurrentServerId(null);
     setNombreCliente("");
     setPerfil(initialPerfil);
     setHijos([]);
@@ -1698,6 +1771,10 @@ export const FinancialProvider = ({ children }: { children: ReactNode }) => {
         cargarProspecto,
         listaClientes,
         currentClientId,
+        currentServerId,
+        listaNube,
+        isFetchingCloud,
+        fetchSincronizadosNube,
         borrarCliente,
         nuevoAnalisis,
         toggleCierreProspecto,

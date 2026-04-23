@@ -1,5 +1,5 @@
 import React, { useEffect, useRef, useState, useMemo } from 'react';
-import { View, Text, ScrollView, TextInput, StyleSheet, TouchableOpacity, Alert, Platform, Animated, Dimensions, Image, Switch, Modal } from 'react-native';
+import { View, Text, ScrollView, TextInput, StyleSheet, TouchableOpacity, Alert, Platform, Animated, Dimensions, Image, Switch, Modal, Linking, ActivityIndicator } from 'react-native';
 import { FontAwesome } from '@expo/vector-icons';
 import { useRouter } from 'expo-router';
 import { useFinancialData, ClienteGuardado } from '../../context/FinancialContext';
@@ -29,6 +29,7 @@ export default function TableroCopiaScreen() {
         advisor, logout, showAlert,
         nombreCliente, guardarProspecto, listaClientes, cargarProspecto, borrarCliente, nuevoAnalisis, actualizarEstadoProspecto,
         importarRespaldo, forceSync, currentClientId, cita,
+        listaNube, isFetchingCloud, fetchSincronizadosNube,
         isLider, equipoLider, asesorSeleccionadoGlobal, setAsesorSeleccionadoGlobal
     } = useFinancialData();
 
@@ -56,6 +57,9 @@ export default function TableroCopiaScreen() {
 
     // --- ESTADO LÍDER DE EQUIPO (Manejado por Contexto) ---
     const [modalAsesoresVisible, setModalAsesoresVisible] = useState(false);
+
+    // --- ESTADO MODAL NOTAS ---
+    const [modalNotasVisible, setModalNotasVisible] = useState(false);
 
     const fadeAnim = useRef(new Animated.Value(0)).current;
     const slideAnim = useRef(new Animated.Value(50)).current;
@@ -93,8 +97,9 @@ export default function TableroCopiaScreen() {
 
     // --- FILTRADO INTELIGENTE (LA CLAVE DEL REQUERIMIENTO) ---
     const filteredClients = useMemo(() => {
-        // 1. Invertir lista (recientes primero)
-        let list = listaClientes.slice().reverse();
+        // Unir lista local y lista de nube
+        let localRev = listaClientes.slice().reverse();
+        let list = [...localRev, ...listaNube];
 
         // 2. Filtro Búsqueda
         if (searchText.trim() !== "") {
@@ -102,7 +107,7 @@ export default function TableroCopiaScreen() {
             list = list.filter(c => c.nombre.toLowerCase().includes(lowerSearch) || c.fechaCreacion.includes(lowerSearch));
         }
         return list;
-    }, [listaClientes, searchText]);
+    }, [listaClientes, listaNube, searchText]);
 
     const totalPages = Math.ceil(filteredClients.length / ITEMS_PER_PAGE);
     const currentItems = useMemo(() => {
@@ -345,19 +350,6 @@ export default function TableroCopiaScreen() {
                 {/* HEADER */}
                 <Animated.View style={{ opacity: fadeAnim, transform: [{ translateY: slideAnim }], width: '100%', alignItems: 'center' }}>
 
-                    {/* BANNER CAPACITACION */}
-                    {advisor?.training && (
-                        <View style={{ backgroundColor: '#fff1f2', borderColor: '#fda4af', borderWidth: 1, padding: 16, borderRadius: 12, width: '100%', marginBottom: 16, shadowColor: '#f43f5e', shadowOffset: { width: 0, height: 4 }, shadowOpacity: 0.1, shadowRadius: 8, elevation: 3 }}>
-                            <View style={{ flexDirection: 'row', alignItems: 'center', marginBottom: 8 }}>
-                                <FontAwesome name="graduation-cap" size={18} color="#e11d48" style={{ marginRight: 8 }} />
-                                <Text style={{ color: '#be123c', fontWeight: 'bold', fontSize: 16 }}>Modo de Capacitación Activo</Text>
-                            </View>
-                            <Text style={{ color: '#9f1239', fontSize: 13, lineHeight: 18 }}>
-                                Tus ADNs creados aquí no se enviarán a ningún servidor, se quedan en local solamente. Esto no contabilizará para tus métricas o progreso. Este espacio es para que practiques libremente.
-                            </Text>
-                        </View>
-                    )}
-
                     <View style={styles.headerContainer}>
                         {/* Fila Top: Logos Centrados Matemáticamente */}
                         <View style={styles.headerTopRow}>
@@ -436,6 +428,21 @@ export default function TableroCopiaScreen() {
                     )}
                 </Animated.View>
 
+                {/* BANNER CAPACITACION */}
+                {advisor?.training && (
+                    <Animated.View style={{ opacity: fadeAnim, transform: [{ translateY: slideAnim }], width: '100%', maxWidth: 600, marginTop: 25 }}>
+                        <View style={{ backgroundColor: '#fff1f2', borderColor: '#fda4af', borderWidth: 1, padding: 16, borderRadius: 12, width: '100%', shadowColor: '#f43f5e', shadowOffset: { width: 0, height: 4 }, shadowOpacity: 0.1, shadowRadius: 8, elevation: 3 }}>
+                            <View style={{ flexDirection: 'row', alignItems: 'center', marginBottom: 8 }}>
+                                <FontAwesome name="graduation-cap" size={18} color="#e11d48" style={{ marginRight: 8 }} />
+                                <Text style={{ color: '#be123c', fontWeight: 'bold', fontSize: 16 }}>Modo de Capacitación Activo</Text>
+                            </View>
+                            <Text style={{ color: '#9f1239', fontSize: 13, lineHeight: 18 }}>
+                                Tus ADNs creados aquí no se enviarán a ningún servidor, se quedan en local solamente. Esto no contabilizará para tus métricas o progreso. Este espacio es para que practiques libremente.
+                            </Text>
+                        </View>
+                    </Animated.View>
+                )}
+
                 {/* HISTORIAL */}
                 <View style={styles.historyContainer}>
                     <TouchableOpacity
@@ -462,6 +469,20 @@ export default function TableroCopiaScreen() {
                                     <FontAwesome name="refresh" size={14} color="#fff" />
                                     <Text style={styles.exportBtnText}>Sincronizar</Text>
                                 </TouchableOpacity> */}
+                                <TouchableOpacity 
+                                    style={[styles.exportBtn, { marginLeft: 10, backgroundColor: COLORS.azul2, opacity: isFetchingCloud ? 0.7 : 1 }]} 
+                                    onPress={fetchSincronizadosNube}
+                                    disabled={isFetchingCloud}
+                                >
+                                    {isFetchingCloud ? (
+                                        <ActivityIndicator size="small" color="#fff" />
+                                    ) : (
+                                        <FontAwesome name="cloud-download" size={14} color="#fff" />
+                                    )}
+                                    <Text style={styles.exportBtnText}>
+                                        {isFetchingCloud ? "Cargando..." : "Cargar Nube"}
+                                    </Text>
+                                </TouchableOpacity>
                                 {isTester && (
                                     <>
                                         <TouchableOpacity style={[styles.exportBtn, { marginLeft: 10 }]} onPress={handleExportBackup}>
@@ -719,6 +740,63 @@ export default function TableroCopiaScreen() {
                     </View>
                 </View>
             </Modal>
+
+            {/* BOTÓN FLOTANTE DE NOTAS */}
+            <TouchableOpacity
+                style={styles.fabNotas}
+                onPress={() => setModalNotasVisible(true)}
+                activeOpacity={0.8}
+            >
+                <FontAwesome name="bullhorn" size={16} color="#fff" style={{ marginRight: 6 }} />
+                <Text style={styles.fabNotasText}>Notas de Versión</Text>
+            </TouchableOpacity>
+
+            {/* MODAL NOTAS DE VERSIÓN */}
+            <Modal visible={modalNotasVisible} animationType="fade" transparent>
+                <View style={styles.modalOverlay}>
+                    <View style={[styles.modalContent, { padding: 25, alignItems: 'center' }]}>
+                        <View style={{ width: 60, height: 60, borderRadius: 30, backgroundColor: '#e0f2fe', justifyContent: 'center', alignItems: 'center', marginBottom: 20 }}>
+                            <FontAwesome name="bullhorn" size={28} color={COLORS.azul1} />
+                        </View>
+                        <Text style={{ fontSize: 18, fontWeight: 'bold', color: COLORS.negro, marginBottom: 5 }}>Novedades</Text>
+                        <Text style={{ fontSize: 14, color: COLORS.textoGris, marginBottom: 15 }}>Versión 1.0.18</Text>
+
+                        <ScrollView style={{ width: '100%', maxHeight: 350, marginBottom: 10, paddingRight: 5, borderBottomWidth: 1, borderBottomColor: '#f3f4f6' }} showsVerticalScrollIndicator={true}>
+
+                            <Text style={{ fontSize: 15, fontWeight: 'bold', color: COLORS.azul1, marginTop: 5, marginBottom: 8 }}>Generales:</Text>
+                            <Text style={{ fontSize: 14, color: COLORS.textoGris, lineHeight: 22, textAlign: 'left', marginBottom: 15 }}>
+                                • Corrección de errores y mejoras generales de rendimiento.{'\n'}
+                                • <Text style={{ fontWeight: 'bold' }}>Sincronización de Prospectos:</Text> El historial de prospectos ahora requiere conexión a internet para ser consultado. La app sigue funcionando de manera offline para tus citas: puedes crear y guardar nuevos prospectos sin internet, y estos se almacenarán de forma segura en tu dispositivo hasta que recuperes la conexión y se sincronicen automáticamente.
+                            </Text>
+
+                            <Text style={{ fontSize: 15, fontWeight: 'bold', color: COLORS.azul1, marginBottom: 8 }}>Para asesores:</Text>
+                            <Text style={{ fontSize: 14, color: COLORS.textoGris, lineHeight: 22, textAlign: 'left', marginBottom: 15 }}>
+                                • Nueva sección de "Impacto a futuro" dentro del módulo de Retiro.{'\n'}
+                                • Mejoras en el flujo al actualizar el estado de un prospecto.{'\n'}
+                                • Nuevo "Modo de Capacitación" (training) exclusivo para asesores en formación.
+                            </Text>
+
+                            <Text style={{ fontSize: 15, fontWeight: 'bold', color: COLORS.azul1, marginBottom: 8 }}>Para líderes:</Text>
+                            <Text style={{ fontSize: 14, color: COLORS.textoGris, lineHeight: 22, textAlign: 'left', marginBottom: 5 }}>
+                                • Nueva función que te permite crear ADNs asignándolos directamente a los miembros de tu equipo.
+                            </Text>
+
+                        </ScrollView>
+
+                        <TouchableOpacity onPress={() => Linking.openURL('https://vigvita.com.mx/vigadn/release-notes')} style={{ marginBottom: 20, paddingVertical: 5 }}>
+                            <Text style={{ fontSize: 14, color: COLORS.azul2, textAlign: 'center', textDecorationLine: 'underline', fontWeight: 'bold' }}>
+                                Ver todas las notas de versiones
+                            </Text>
+                        </TouchableOpacity>
+
+                        <TouchableOpacity
+                            style={{ width: '100%', paddingVertical: 14, borderRadius: 12, backgroundColor: COLORS.azul1, alignItems: 'center' }}
+                            onPress={() => setModalNotasVisible(false)}>
+                            <Text style={{ fontWeight: 'bold', color: COLORS.blanco, fontSize: 15 }}>Cerrar</Text>
+                        </TouchableOpacity>
+                    </View>
+                </View>
+            </Modal>
         </View>
     );
 }
@@ -779,7 +857,7 @@ const AnimatedClientRow = ({ cliente, index, onLoad, onDelete, onAbrirModalEstad
             <View style={styles.rowRight}>
                 {/* Indicador de Sincronización */}
                 <View style={[styles.iconBtn, { backgroundColor: cliente.sincronizado ? '#dbeafe' : '#fef3c7' }]}>
-                    <FontAwesome name="cloud" size={14} color={cliente.sincronizado ? COLORS.nubeSync : COLORS.nubePending} />
+                    <FontAwesome name={cliente.sincronizado ? "cloud" : "clock-o"} size={14} color={cliente.sincronizado ? COLORS.nubeSync : COLORS.nubePending} />
                 </View>
 
                 {/* Botón de Estado en lugar de Switch */}
@@ -971,5 +1049,9 @@ const styles = StyleSheet.create({
     btnCierreText: { flex: 1, fontSize: 14, fontWeight: '700', color: COLORS.negro },
 
     badgeCierre: { backgroundColor: COLORS.verde, paddingHorizontal: 6, paddingVertical: 2, borderRadius: 6, marginLeft: 4, marginTop: 2 },
-    badgeCierreText: { color: '#fff', fontSize: 9, fontWeight: 'bold', textTransform: 'uppercase' }
+    badgeCierreText: { color: '#fff', fontSize: 9, fontWeight: 'bold', textTransform: 'uppercase' },
+
+    // BOTÓN FLOTANTE
+    fabNotas: { position: 'absolute', top: 50, left: 20, backgroundColor: COLORS.azul1, flexDirection: 'row', alignItems: 'center', paddingVertical: 10, paddingHorizontal: 15, borderRadius: 25, shadowColor: "#000", shadowOffset: { width: 0, height: 4 }, shadowOpacity: 0.2, shadowRadius: 8, elevation: 5, zIndex: 10 },
+    fabNotasText: { color: '#fff', fontWeight: 'bold', fontSize: 12 }
 });
