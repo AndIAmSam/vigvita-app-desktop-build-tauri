@@ -993,6 +993,7 @@ export const FinancialProvider = ({ children }: { children: ReactNode }) => {
       const response = await fetch(`${API_BASE_URL}/api/profiles`, {
         method: "GET",
         headers: {
+          "Accept": "application/json",
           "Authorization": `Bearer ${advisor.token}`
         }
       });
@@ -1003,28 +1004,53 @@ export const FinancialProvider = ({ children }: { children: ReactNode }) => {
       }
 
       if (response.ok) {
-        const json = await response.json();
-        const profiles = json.profiles || [];
+        let json;
+        try {
+          json = await response.json();
+        } catch (parseError) {
+          const rawText = await response.text();
+          console.error("Error parseando JSON de la nube:", rawText.substring(0, 200));
+          showAlert("El servidor devolvió un formato no válido.");
+          setIsFetchingCloud(false);
+          return;
+        }
+
+        const profiles = json.profiles || json.data || (Array.isArray(json) ? json : []);
         
         const mappedCloud = profiles.map((p: any) => {
+          let safeDate = new Date();
+          if (p.created_at) {
+            const sanitized = p.created_at.toString().replace(" ", "T");
+            const parsed = new Date(sanitized);
+            if (!isNaN(parsed.getTime())) safeDate = parsed;
+          }
+
+          // Safety check for stringified JSON payloads
+          let parsedData = {};
+          try {
+            parsedData = typeof p.data === 'string' ? JSON.parse(p.data) : (p.data || {});
+          } catch (e) {
+            parsedData = {};
+          }
+
           return {
             id: p.id,
             serverId: p.id,
-            nombre: p.client_name,
-            fechaCreacion: new Date(p.created_at).toLocaleDateString("es-MX"),
-            estatusAdquisicion: p.status,
+            nombre: p.client_name || p.name || "Sin Nombre",
+            fechaCreacion: safeDate.toLocaleDateString("es-MX"),
+            estatusAdquisicion: p.status || p.acquisition_status || "en_espera",
             sincronizado: true, // Vienen de la nube
-            data: unmapClientData(p.data || {})
+            data: unmapClientData(parsedData)
           } as ClienteGuardado;
         });
 
         setListaNube(mappedCloud);
       } else {
-        showAlert("No se pudieron obtener los datos de la nube.");
+        showAlert(`No se pudieron obtener los datos (Status: ${response.status}).`);
       }
-    } catch (e) {
+    } catch (e: any) {
       console.error("Error al obtener la nube:", e);
-      showAlert("Hubo un error de conexión al consultar la nube.");
+      showAlert(`Error al cargar la nube: ${e.message || "Fallo de red"}`);
     } finally {
       setIsFetchingCloud(false);
     }
