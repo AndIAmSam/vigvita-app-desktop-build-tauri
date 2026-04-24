@@ -827,16 +827,28 @@ export const FinancialProvider = ({ children }: { children: ReactNode }) => {
       necesitaDecisionMaker: data.appointment?.needs_decision_maker || false,
       nombreDecisionMaker: data.appointment?.decision_maker_name || "",
     },
-    referidos: (data.referrals || []).map((r: any, i: number) => ({
-      id: r.id || `ref-${Date.now()}-${i}`,
-      nombre: r.name || "",
-      edad: toStr(r.age),
-      estadoCivil: r.marital_status || "",
-      ocupacion: r.occupation || "",
-      telefono: r.phone || "",
-      entorno: r.circle || "",
-      grupoFamiliar: r.family_group || "",
-    })),
+    referidos: (() => {
+      // La pantalla 7-referidos.tsx busca referidos por ID con formato "${entorno}-${index}".
+      // Ejemplo: "Familiar-0", "Personal-1", "Social-0", etc.
+      // Agrupamos por entorno y asignamos índices secuenciales dentro de cada grupo.
+      const rawRefs = (data.referrals || []).map((r: any) => ({
+        nombre: r.name || "",
+        edad: toStr(r.age),
+        estadoCivil: r.marital_status || "",
+        ocupacion: r.occupation || "",
+        telefono: r.phone || "",
+        entorno: r.circle || "Personal",
+        grupoFamiliar: r.family_group || "",
+      }));
+
+      const entornoCounters: Record<string, number> = {};
+      return rawRefs.map((ref: any) => {
+        const env = ref.entorno;
+        const idx = entornoCounters[env] || 0;
+        entornoCounters[env] = idx + 1;
+        return { ...ref, id: `${env}-${idx}` };
+      });
+    })(),
     notas: data.notes || "",
     piramideLevels: (data.priority_levels || []).map((l: any) => ({
       id: l.id,

@@ -130,9 +130,18 @@ export default function TableroCopiaScreen() {
     // --- FILTRADO DE REFERIDOS (NUEVO) ---
     const REF_PER_PAGE = 10;
     const filteredReferidos = useMemo(() => {
-        // 1. Aplanar todos los referidos de la listaClientes
+        // 1. Aplanar todos los referidos de local + nube (sin duplicar)
+        const localServerIds = new Set(
+            listaClientes.map(c => c.serverId).filter(Boolean)
+        );
+        // Solo incluir prospectos de la nube que NO estén ya en local
+        const uniqueCloudForRefs = listaNube.filter(
+            cp => !localServerIds.has(cp.serverId)
+        );
+        const allProspects = [...listaClientes, ...uniqueCloudForRefs];
+
         let allRefs: any[] = [];
-        listaClientes.forEach(c => {
+        allProspects.forEach(c => {
             if (c.data?.referidos && Array.isArray(c.data.referidos)) {
                 c.data.referidos.forEach((r: any) => {
                     // Solo si no está vacío el nombre
@@ -161,7 +170,7 @@ export default function TableroCopiaScreen() {
             );
         }
         return allRefs;
-    }, [listaClientes, searchRefText]);
+    }, [listaClientes, listaNube, searchRefText]);
 
     const totalRefPages = Math.ceil(filteredReferidos.length / REF_PER_PAGE);
     const currentRefItems = useMemo(() => {
