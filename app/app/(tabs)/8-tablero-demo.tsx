@@ -479,8 +479,9 @@ export default function TableroCopiaScreen() {
                                     <FontAwesome name="refresh" size={14} color="#fff" />
                                     <Text style={styles.exportBtnText}>Sincronizar</Text>
                                 </TouchableOpacity> */}
-                                <TouchableOpacity 
-                                    style={[styles.exportBtn, { marginLeft: 10, backgroundColor: COLORS.azul2, opacity: isFetchingCloud ? 0.7 : 1 }]} 
+                                {!advisor?.training && (
+                                <TouchableOpacity
+                                    style={[styles.exportBtn, { marginLeft: 10, backgroundColor: COLORS.azul2, opacity: isFetchingCloud ? 0.7 : 1 }]}
                                     onPress={fetchSincronizadosNube}
                                     disabled={isFetchingCloud}
                                 >
@@ -490,9 +491,10 @@ export default function TableroCopiaScreen() {
                                         <FontAwesome name="cloud-download" size={14} color="#fff" />
                                     )}
                                     <Text style={styles.exportBtnText}>
-                                        {isFetchingCloud ? "Cargando..." : "Cargar Nube"}
+                                        {isFetchingCloud ? "Cargando..." : "Obtener mis ADNs"}
                                     </Text>
                                 </TouchableOpacity>
+                                )}
                                 {isTester && (
                                     <>
                                         <TouchableOpacity style={[styles.exportBtn, { marginLeft: 10 }]} onPress={handleExportBackup}>
@@ -857,6 +859,16 @@ const AnimatedClientRow = ({ cliente, index, onLoad, onDelete, onAbrirModalEstad
                                 <FontAwesome name="user" size={10} color={COLORS.textoGris} style={{ marginRight: 4 }} />
                                 <Text style={{ fontSize: 10, color: COLORS.textoGris, fontStyle: 'italic', fontWeight: 'bold' }}>
                                     hecho para: {cliente.asesorAsignado.nombre}
+                                </Text>
+                            </View>
+                        )}
+
+                        {/* VISUAL: Mostrar quién creó el ADN si fue un líder (Para el asesor) */}
+                        {cliente.creadoPor && (
+                            <View style={{ backgroundColor: '#f5f3ff', paddingHorizontal: 6, paddingVertical: 2, borderRadius: 4, marginLeft: 8, flexDirection: 'row', alignItems: 'center', borderWidth: 1, borderColor: '#e0d8f5' }}>
+                                <FontAwesome name="star" size={10} color="#7c3aed" style={{ marginRight: 4 }} />
+                                <Text style={{ fontSize: 10, color: '#7c3aed', fontStyle: 'italic', fontWeight: 'bold' }}>
+                                    hecho por: {cliente.creadoPor}
                                 </Text>
                             </View>
                         )}

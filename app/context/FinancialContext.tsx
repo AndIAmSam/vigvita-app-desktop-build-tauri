@@ -172,7 +172,8 @@ export interface ClienteGuardado {
   estatusAdquisicion?: "en_espera" | "descartado" | "cierre";
   tipoCierre?: string; // Legacy
   tiposCierre?: string[]; // Array de pólizas seleccionadas
-  asesorAsignado?: { id: string; nombre: string }; // NUEVO: Para funciones de líder
+  asesorAsignado?: { id: string; nombre: string }; // Para funciones de líder ("hecho para")
+  creadoPor?: string; // Nombre del líder que creó este ADN ("hecho por", viene de relationship.created_by)
   sincronizado: boolean;
   data: any;
 }
@@ -1054,18 +1055,59 @@ export const FinancialProvider = ({ children }: { children: ReactNode }) => {
           if (p.status === "completed") localStatus = "cierre";
           else if (p.status === "cancelled") localStatus = "descartado";
 
-          return {
+          // Mapear relationship del servidor (API v8/v9)
+          const relationship = p.relationship || {};
+
+          const mapped: ClienteGuardado = {
             id: p.id,
             serverId: p.id,
             nombre: p.client_name || "Sin Nombre",
             fechaCreacion: safeDate.toLocaleDateString("es-MX"),
             estatusAdquisicion: localStatus,
             sincronizado: true,
-            data: unmapClientData(parsedData)
-          } as ClienteGuardado;
+            data: unmapClientData(parsedData),
+          };
+
+          // "hecho para" — el líder ve para quién lo hizo
+          if (relationship.created_for) {
+            mapped.asesorAsignado = { id: '', nombre: relationship.created_for };
+          }
+          // "hecho por" — el asesor ve quién se lo creó
+          if (relationship.created_by) {
+            mapped.creadoPor = relationship.created_by;
+          }
+
+          return mapped;
         });
 
         setListaNube(mappedCloud);
+
+        // --- PURGA SEGURA: Limpiar de local los prospectos que el servidor
+        //     confirmó que tiene (profilesOk). Solo se borran locales que:
+        //     1. Ya estaban marcados sincronizado: true
+        //     2. Su serverId coincide con un perfil sano del servidor (NO needs_resync)
+        //     Esto garantiza CERO pérdida de datos.
+        const confirmedServerIds = new Set(profilesOk.map((p: any) => p.id));
+
+        if (confirmedServerIds.size > 0) {
+          setListaClientes((prev) => {
+            const cleaned = prev.filter((c) => {
+              // Siempre conservar pendientes (no sincronizados)
+              if (!c.sincronizado) return true;
+              // Conservar si no tiene serverId (seguridad)
+              if (!c.serverId) return true;
+              // Conservar si el servidor NO lo tiene confirmado
+              if (!confirmedServerIds.has(c.serverId)) return true;
+              // El servidor confirma que tiene una copia sana → seguro purgar
+              return false;
+            });
+
+            if (cleaned.length !== prev.length) {
+              localforage.setItem("clientes_db", JSON.stringify(cleaned)).catch(console.error);
+            }
+            return cleaned;
+          });
+        }
 
         // --- 2. Procesar perfiles con needs_resync: true ---
         if (profilesNeedResync.length > 0) {
@@ -1151,12 +1193,14 @@ export const FinancialProvider = ({ children }: { children: ReactNode }) => {
         // 1. Cargar Sesión
         const storedSession = await localforage.getItem<string>("advisor_session");
 
+        let validUser: any = null;
+
         if (storedSession) {
           const parsedSession = JSON.parse(storedSession);
 
           // Compatibilidad: Si tiene la propiedad .user, es el formato moderno ({user, loginTime}). 
           // Si no la tiene, asumimos que es el formato viejo (objeto plano con el token).
-          const validUser = parsedSession.user ? parsedSession.user : parsedSession;
+          validUser = parsedSession.user ? parsedSession.user : parsedSession;
           const loginTime = parsedSession.loginTime || Date.now(); // Fallback si era legacy
           const sessionVersion = parsedSession.sessionVersion || 1; // Asumimos versión 1 si no lo traía
 
@@ -1185,10 +1229,23 @@ export const FinancialProvider = ({ children }: { children: ReactNode }) => {
             }
           }
         }
-        // 2. Cargar DB Local (Igual que antes)
+        // 2. Cargar DB Local (sin purga — la limpieza segura ocurre en fetchSincronizadosNube
+        //    después de que el servidor confirme que tiene los datos)
         const storedDB = await localforage.getItem<string>("clientes_db");
         if (storedDB) setListaClientes(JSON.parse(storedDB));
 
+        // 2b. RESPALDO DE EMERGENCIA (pre-migration snapshot)
+        // Se ejecuta UNA SOLA VEZ: la primera vez que la app corre con esta versión.
+        // Guarda una copia intacta de todos los prospectos locales ANTES de que
+        // la transición a la nube pueda purgar datos. Si el backup ya existe,
+        // no se toca. Eliminable en una versión futura cuando el backend sea estable.
+        if (storedDB) {
+          const backupExists = await localforage.getItem("emergency_backup_v1");
+          if (!backupExists) {
+            await localforage.setItem("emergency_backup_v1", storedDB);
+            console.log("[BACKUP] Respaldo de emergencia creado con éxito.");
+          }
+        }
         // 3. Cargar Borrador (Draft Snapshot)
         const storedDraft = await localforage.getItem<string>("draft_prospect_v1");
         if (storedDraft) {
@@ -1248,6 +1305,21 @@ export const FinancialProvider = ({ children }: { children: ReactNode }) => {
       setPendingDraftAlert(false);
     }
   }, [advisor, pendingDraftAlert]);
+
+  // AUTO-FETCH: Al arrancar la app, si el usuario está autenticado y no es
+  // de capacitación, traer automáticamente los prospectos de la nube.
+  // Esto limpia los remanentes locales sincronizados (purga segura dentro
+  // de fetchSincronizadosNube) y muestra la lista actualizada sin que el
+  // usuario tenga que presionar "Obtener mis ADNs" manualmente.
+  useEffect(() => {
+    if (isInitialized && advisor && !advisor.training && advisor.id !== "DEV-MODE" && isOnline) {
+      // Retraso para no competir con la transición de pantallas al arrancar
+      const timer = setTimeout(() => {
+        fetchSincronizadosNube();
+      }, 2000);
+      return () => clearTimeout(timer);
+    }
+  }, [isInitialized, advisor]);
 
   // LOGIN (INTEGRADO CON BACKEND)
   const login = async (
@@ -1358,27 +1430,34 @@ export const FinancialProvider = ({ children }: { children: ReactNode }) => {
 
     try {
       const API_BASE_URL = process.env.EXPO_PUBLIC_API_URL || "https://vigvita.com.mx";
-      // Hacemos ping a una ruta protegida con un payload vacío.
-      const targetUrl = `${API_BASE_URL}/api/profiles/new`;
+
+      // TRAINEES: Validamos contra /app/d/u.json (solo requiere 'auth') porque
+      // /api/profiles/new exige permiso 'advisor' que los trainees no tienen.
+      // ASESORES NORMALES: Validamos contra /api/profiles/new como siempre.
+      const isTrainee = advisor.training === true;
+      const targetUrl = isTrainee
+        ? `${API_BASE_URL}/app/d/u.json`
+        : `${API_BASE_URL}/api/profiles/new`;
 
       const response = await fetch(targetUrl, {
-        method: "POST",
+        method: isTrainee ? "GET" : "POST",
         headers: {
-          "Content-Type": "application/json",
+          ...(isTrainee ? {} : { "Content-Type": "application/json" }),
           "Authorization": `Bearer ${advisor.token}`
         },
-        body: JSON.stringify({ clients: [] })
+        ...(isTrainee ? {} : { body: JSON.stringify({ clients: [] }) })
       });
 
       // El middleware auth lanza 404/401 si el usuario fue borrado o si el token caducó.
+      // Esto aplica TANTO para trainees como para asesores normales.
       if (response.status === 404 || response.status === 401 || response.status === 403) {
-        Alert.alert("Error de Autenticación", `El sevidor denegó tu sesión (Código: ${response.status}). Saliendo...`);
+        Alert.alert("Error de Autenticación", `El servidor denegó tu sesión (Código: ${response.status}). Saliendo...`);
         await logout(); // Force logout inmediatamente
         return false;
       }
 
-      // Si la API responde 422 (Body empty) u otro código, la autenticación fue exitosa.
-      if (response.status !== 422 && response.status !== 201 && response.status !== 200) {
+      // Para asesores normales: 422 (body empty) = auth OK. Para trainees: 200 = auth OK.
+      if (!isTrainee && response.status !== 422 && response.status !== 201 && response.status !== 200) {
         Alert.alert("Advertencia de Red", `Respuesta inusual: ${response.status}`);
       }
 
