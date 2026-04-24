@@ -97,11 +97,21 @@ export default function TableroCopiaScreen() {
 
     // --- FILTRADO INTELIGENTE (LA CLAVE DEL REQUERIMIENTO) ---
     const filteredClients = useMemo(() => {
-        // Unir lista local y lista de nube
+        // 1. Lista local (recientes primero)
         let localRev = listaClientes.slice().reverse();
-        let list = [...localRev, ...listaNube];
 
-        // 2. Filtro Búsqueda
+        // 2. Deduplicar: Excluir prospectos de la nube que ya existen en local
+        //    (match por serverId). La copia local siempre tiene prioridad.
+        const localServerIds = new Set(
+            listaClientes.map(c => c.serverId).filter(Boolean)
+        );
+        const uniqueCloudProfiles = listaNube.filter(
+            cloudProfile => !localServerIds.has(cloudProfile.serverId)
+        );
+
+        let list = [...localRev, ...uniqueCloudProfiles];
+
+        // 3. Filtro Búsqueda
         if (searchText.trim() !== "") {
             const lowerSearch = searchText.toLowerCase();
             list = list.filter(c => c.nombre.toLowerCase().includes(lowerSearch) || c.fechaCreacion.includes(lowerSearch));

@@ -839,7 +839,7 @@ export const FinancialProvider = ({ children }: { children: ReactNode }) => {
   });
 
   // --- SYNC COMO JSON PURO ---
-  const forceSync = async (overrideList?: ClienteGuardado[]): Promise<string> => {
+  const forceSync = async (overrideList?: ClienteGuardado[], skipCloudRefresh?: boolean): Promise<string> => {
     // DEV MODE BYPASS: Evitar auto-sincronización y logouts forzados por token falso
     if (advisor?.id === "DEV-MODE") {
       setSyncStatus("synced");
@@ -961,6 +961,16 @@ export const FinancialProvider = ({ children }: { children: ReactNode }) => {
 
         setSyncStatus("synced");
         setLastSyncTime(new Date().toLocaleTimeString());
+
+        // Auto-refresh: Traer los prospectos de la nube para que aparezcan
+        // inmediatamente en la lista sin que el usuario presione "Cargar Nube".
+        // Se omite cuando forceSync fue disparado por el handler de needs_resync
+        // para evitar un bucle infinito (resync → sync → fetch → resync...).
+        if (!skipCloudRefresh) {
+          setTimeout(() => {
+            fetchSincronizadosNube();
+          }, 500);
+        }
 
         return "Sincronización exitosa con el servidor.";
       } else {
@@ -1105,10 +1115,12 @@ export const FinancialProvider = ({ children }: { children: ReactNode }) => {
             showAlert(msg);
           }, 500);
 
-          // Disparar re-sincronización automática para subir las copias locales
+          // Disparar re-sincronización automática para subir las copias locales.
+          // IMPORTANTE: skipCloudRefresh = true para evitar bucle infinito
+          // (resync → forceSync → fetchNube → resync → forceSync → ...)
           if (resyncCount > 0) {
             setTimeout(() => {
-              forceSync();
+              forceSync(undefined, true);
             }, 1500);
           }
         }
