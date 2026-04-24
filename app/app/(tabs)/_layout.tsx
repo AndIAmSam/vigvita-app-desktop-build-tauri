@@ -260,19 +260,58 @@ export default function TabLayout() {
         <Tabs.Screen name="9-notas" options={{ href: null }} />
       </Tabs>
 
-      {/* Indicador de última sincronización global flotante superior (Solo visible en tablero) */}
-      {pathname.includes('8-tablero-demo') && lastSyncTime && isOnline && syncStatus === 'synced' && (
-        <View style={styles.syncIndicator}>
-          <FontAwesome name="check-circle" size={10} color={COLORS.active} style={{ marginRight: 4 }} />
-          <Text style={styles.syncIndicatorText}>Sincronizado: {lastSyncTime}</Text>
-        </View>
-      )}
-      {pathname.includes('8-tablero-demo') && syncStatus === 'syncing' && isOnline && (
-        <View style={styles.syncIndicator}>
-          <FontAwesome name="refresh" size={10} color="#f59e0b" style={{ marginRight: 4 }} />
-          <Text style={[styles.syncIndicatorText, { color: '#f59e0b' }]}>Sincronizando...</Text>
-        </View>
-      )}
+      {/* Indicador de estado de conexión/sincronización — SIEMPRE visible en tablero */}
+      {pathname.includes('8-tablero-demo') && (() => {
+        let icon: string;
+        let iconColor: string;
+        let label: string;
+        let labelColor: string;
+        let bgColor = 'rgba(255, 255, 255, 0.85)';
+        let borderColor = 'transparent';
+
+        if (!isOnline) {
+          // Sin conexión
+          icon = 'wifi';
+          iconColor = '#f59e0b';
+          label = 'Modo offline';
+          labelColor = '#d97706';
+          bgColor = 'rgba(255, 247, 237, 0.95)';
+          borderColor = '#fed7aa';
+        } else if (syncStatus === 'syncing') {
+          // Sincronizando activamente
+          icon = 'refresh';
+          iconColor = '#f59e0b';
+          label = 'Sincronizando...';
+          labelColor = '#f59e0b';
+        } else if (syncStatus === 'pending') {
+          // Hay datos pendientes por subir
+          icon = 'clock-o';
+          iconColor = '#f59e0b';
+          label = 'Pendiente de sincronizar';
+          labelColor = '#d97706';
+          bgColor = 'rgba(255, 251, 235, 0.95)';
+          borderColor = '#fde68a';
+        } else if (lastSyncTime) {
+          // Sincronizado con hora registrada
+          icon = 'check-circle';
+          iconColor = COLORS.active;
+          label = `Sincronizado: ${lastSyncTime}`;
+          labelColor = '#64748b';
+        } else {
+          // Online pero aún no ha sincronizado en esta sesión
+          icon = 'signal';
+          iconColor = COLORS.active;
+          label = 'Conectado';
+          labelColor = '#64748b';
+        }
+
+        return (
+          <View style={[styles.syncIndicator, { backgroundColor: bgColor, borderWidth: borderColor !== 'transparent' ? 1 : 0, borderColor }]}>
+            <FontAwesome name={icon as any} size={10} color={iconColor} style={{ marginRight: 4 }} />
+            <Text style={[styles.syncIndicatorText, { color: labelColor }]}>{label}</Text>
+          </View>
+        );
+      })()}
 
       {/* Logos + nombre del asesor - esquina superior derecha, apilados */}
       {showAdvisorBadge && (

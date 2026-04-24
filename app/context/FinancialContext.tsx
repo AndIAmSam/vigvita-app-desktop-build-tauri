@@ -456,7 +456,11 @@ export const FinancialProvider = ({ children }: { children: ReactNode }) => {
 
   // --- ESTADOS DE SYNC ---
   const [syncStatus, setSyncStatus] = useState<SyncStatus>("synced");
-  const [isOnline, setIsOnline] = useState(true); // Simulador de internet
+  const [isOnline, setIsOnline] = useState(
+    typeof navigator !== 'undefined' && typeof navigator.onLine === 'boolean'
+      ? navigator.onLine
+      : true // Fallback seguro si navigator no existe (SSR)
+  );
   const [lastSyncTime, setLastSyncTime] = useState<string | null>(null);
 
   // --- ESTADOS DEL MODAL GLOBAL ---
@@ -526,6 +530,22 @@ export const FinancialProvider = ({ children }: { children: ReactNode }) => {
     notas,
     piramideLevels,
   ]);
+
+  // DETECCIÓN DE CONECTIVIDAD EN TIEMPO REAL
+  useEffect(() => {
+    if (typeof window === 'undefined') return; // SSR guard
+
+    const handleOnline = () => setIsOnline(true);
+    const handleOffline = () => setIsOnline(false);
+
+    window.addEventListener('online', handleOnline);
+    window.addEventListener('offline', handleOffline);
+
+    return () => {
+      window.removeEventListener('online', handleOnline);
+      window.removeEventListener('offline', handleOffline);
+    };
+  }, []);
 
   // AUTO SYNC TRIGGER
   useEffect(() => {
@@ -1020,11 +1040,16 @@ export const FinancialProvider = ({ children }: { children: ReactNode }) => {
     setIsFetchingCloud(true);
     try {
       const API_BASE_URL = process.env.EXPO_PUBLIC_API_URL || "https://vigvita.com.mx";
+      const authHeaders = { "Authorization": `Bearer ${advisor.token}` };
+
+      // ============================================================
+      // PASO 1: Obtener el ÍNDICE de perfiles (API v10 — solo resumen)
+      // GET /api/profiles → { profiles: [{ id, client_name, status, ... }] }
+      // Ya NO incluye 'data'. Los datos completos se piden individualmente.
+      // ============================================================
       const response = await fetch(`${API_BASE_URL}/api/profiles`, {
         method: "GET",
-        headers: {
-          "Authorization": `Bearer ${advisor.token}`
-        }
+        headers: authHeaders
       });
 
       if (response.status === 401 || response.status === 403 || response.status === 404) {
@@ -1036,11 +1061,7 @@ export const FinancialProvider = ({ children }: { children: ReactNode }) => {
         const json = await response.json();
         const profilesList = json.profiles || json.data || [];
 
-        // ============================================================
-        // API v9 — RESYNC DE EMERGENCIA
-        // Separar perfiles que el backend marcó como corruptos/perdidos
-        // de los que están bien.
-        // ============================================================
+        // Separar perfiles sanos de los que necesitan resync
         const profilesOk: any[] = [];
         const profilesNeedResync: any[] = [];
 
@@ -1052,52 +1073,46 @@ export const FinancialProvider = ({ children }: { children: ReactNode }) => {
           }
         }
 
-        // --- 1. Procesar perfiles que NO necesitan resync (flujo normal) ---
+        // --- Procesar resumen de perfiles sanos (API v10: sin data) ---
+        // Los datos completos se obtienen bajo demanda en cargarProspecto
+        // cuando el usuario selecciona un prospecto específico.
         const mappedCloud = profilesOk.map((p: any) => {
-          // WebKit safe date parsing
-          let safeDate = new Date();
-          if (p.created_at) {
-            const sanitized = p.created_at.toString().replace(" ", "T");
-            const parsed = new Date(sanitized);
-            if (!isNaN(parsed.getTime())) safeDate = parsed;
-          }
+            // WebKit safe date parsing
+            let safeDate = new Date();
+            if (p.created_at) {
+              const sanitized = p.created_at.toString().replace(" ", "T");
+              const parsed = new Date(sanitized);
+              if (!isNaN(parsed.getTime())) safeDate = parsed;
+            }
 
-          // Safety check for stringified JSON payloads
-          let parsedData = {};
-          try {
-            parsedData = typeof p.data === 'string' ? JSON.parse(p.data) : (p.data || {});
-          } catch (e) {
-            parsedData = {};
-          }
+            let localStatus: "en_espera" | "descartado" | "cierre" = "en_espera";
+            if (p.status === "completed") localStatus = "cierre";
+            else if (p.status === "cancelled") localStatus = "descartado";
 
-          let localStatus: "en_espera" | "descartado" | "cierre" = "en_espera";
-          if (p.status === "completed") localStatus = "cierre";
-          else if (p.status === "cancelled") localStatus = "descartado";
+            // Mapear relationship del servidor
+            const relationship = p.relationship || {};
 
-          // Mapear relationship del servidor (API v8/v9)
-          const relationship = p.relationship || {};
+            const mapped: ClienteGuardado = {
+              id: p.id,
+              serverId: p.id,
+              nombre: p.client_name || "Sin Nombre",
+              fechaCreacion: safeDate.toLocaleDateString("es-MX"),
+              estatusAdquisicion: localStatus,
+              sincronizado: true,
+              data: {}, // Vacío: se carga bajo demanda via GET /api/profiles/{id}
+            };
 
-          const mapped: ClienteGuardado = {
-            id: p.id,
-            serverId: p.id,
-            nombre: p.client_name || "Sin Nombre",
-            fechaCreacion: safeDate.toLocaleDateString("es-MX"),
-            estatusAdquisicion: localStatus,
-            sincronizado: true,
-            data: unmapClientData(parsedData),
-          };
+            // "hecho para" — el líder ve para quién lo hizo
+            if (relationship.created_for) {
+              mapped.asesorAsignado = { id: '', nombre: relationship.created_for };
+            }
+            // "hecho por" — el asesor ve quién se lo creó
+            if (relationship.created_by) {
+              mapped.creadoPor = relationship.created_by;
+            }
 
-          // "hecho para" — el líder ve para quién lo hizo
-          if (relationship.created_for) {
-            mapped.asesorAsignado = { id: '', nombre: relationship.created_for };
-          }
-          // "hecho por" — el asesor ve quién se lo creó
-          if (relationship.created_by) {
-            mapped.creadoPor = relationship.created_by;
-          }
-
-          return mapped;
-        });
+            return mapped;
+          });
 
         setListaNube(mappedCloud);
 
@@ -1794,10 +1809,68 @@ export const FinancialProvider = ({ children }: { children: ReactNode }) => {
     await localforage.setItem("clientes_db", JSON.stringify(nuevaLista));
   };
 
-  const cargarProspecto = (cliente: ClienteGuardado) => {
+  const cargarProspecto = async (cliente: ClienteGuardado) => {
+    let d = cliente.data;
+
+    // API v10 — LAZY LOADING: Si es un perfil de la nube (sincronizado + serverId)
+    // y no tiene datos cargados aún, obtenerlos bajo demanda.
+    const hasData = d && Object.keys(d).length > 0 && d.perfil;
+
+    if (!hasData && cliente.serverId) {
+      // --- GUARDIA OFFLINE: Si no hay conexión o token, NO cargamos datos vacíos ---
+      if (!isOnline || !advisor?.token) {
+        showAlert("Sin conexión a internet. No se pueden obtener los datos completos de este prospecto. Conéctate a internet e intenta de nuevo.");
+        return; // Abortar — no modificamos ningún estado del formulario
+      }
+
+      setIsFetchingCloud(true);
+      let fetchSucceeded = false;
+      try {
+        const API_BASE_URL = process.env.EXPO_PUBLIC_API_URL || "https://vigvita.com.mx";
+        const res = await fetch(`${API_BASE_URL}/api/profiles/${cliente.serverId}`, {
+          method: "GET",
+          headers: { "Authorization": `Bearer ${advisor.token}` }
+        });
+
+        if (res.ok) {
+          const fullProfile = await res.json();
+          let parsedData = {};
+          try {
+            parsedData = typeof fullProfile.data === 'string'
+              ? JSON.parse(fullProfile.data)
+              : (fullProfile.data || {});
+          } catch (e) {
+            parsedData = {};
+          }
+          d = unmapClientData(parsedData);
+          fetchSucceeded = true;
+
+          // Actualizar listaNube con los datos descargados para no volver a pedirlos
+          setListaNube((prev) =>
+            prev.map((c) => c.serverId === cliente.serverId ? { ...c, data: d } : c)
+          );
+        } else if (res.status === 401 || res.status === 403 || res.status === 404) {
+          showAlert(`No se pudo obtener el perfil del servidor (${res.status}).`);
+          return; // Abortar — no cargamos datos vacíos
+        } else {
+          showAlert(`Error al obtener el perfil (${res.status}). Intenta de nuevo.`);
+          return; // Abortar — no cargamos datos vacíos
+        }
+      } catch (e: any) {
+        console.error("Error al cargar detalle del perfil:", e);
+        showAlert("Error de red al obtener los datos del prospecto. Verifica tu conexión a internet.");
+        return; // Abortar — no cargamos datos vacíos al formulario
+      } finally {
+        setIsFetchingCloud(false);
+      }
+
+      // Doble seguridad: si por alguna razón el fetch no fue exitoso, no cargamos
+      if (!fetchSucceeded) return;
+    }
+
+    // Solo modificamos el estado del formulario si tenemos datos reales
     setCurrentClientId(cliente.id);
     setCurrentServerId(cliente.serverId || null);
-    const d = cliente.data;
     setNombreCliente(cliente.nombre);
     setPerfil(d.perfil || initialPerfil);
     setHijos(d.hijos || []);
