@@ -418,11 +418,11 @@ export const FinancialProvider = ({ children }: { children: ReactNode }) => {
   const [isInitialized, setIsInitialized] = useState(false);
   const [advisor, setAdvisor] = useState<Advisor | null>(null);
   const [userName, setUserName] = useState(""); // Nombre visual (legacy)
-  
+
   // LÍDER DE EQUIPO
   const [isLider, setIsLider] = useState(false);
-  const [equipoLider, setEquipoLider] = useState<{id: string, nombre: string}[]>([]);
-  const [asesorSeleccionadoGlobal, setAsesorSeleccionadoGlobal] = useState<{id: string, nombre: string} | null>(null);
+  const [equipoLider, setEquipoLider] = useState<{ id: string, nombre: string }[]>([]);
+  const [asesorSeleccionadoGlobal, setAsesorSeleccionadoGlobal] = useState<{ id: string, nombre: string } | null>(null);
 
   // CRM
   const [nombreCliente, setNombreCliente] = useState("");
@@ -477,7 +477,7 @@ export const FinancialProvider = ({ children }: { children: ReactNode }) => {
 
     // Ignorar guardado si el prospecto está completamente en blanco (ej. justo después de "Nuevo Análisis" o al arrancar por 1ra vez)
     if (!currentClientId && !nombreCliente.trim() && !perfil.telefono.trim() && !perfil.ocupacion.trim()) {
-        return;
+      return;
     }
 
     const snapshot = {
@@ -500,10 +500,10 @@ export const FinancialProvider = ({ children }: { children: ReactNode }) => {
       notas,
       piramideLevels,
     };
-    
+
     // Lo guardamos de manera asíncrona silenciosa
     localforage.setItem("draft_prospect_v1", JSON.stringify(snapshot)).catch(e => {
-        console.error("Error auto-saving draft:", e);
+      console.error("Error auto-saving draft:", e);
     });
 
   }, [
@@ -708,11 +708,18 @@ export const FinancialProvider = ({ children }: { children: ReactNode }) => {
   });
 
   // --- HELPER: Mapeo inverso inglés → español (para respuestas del servidor) ---
+  // toStr: convierte cualquier valor a string para que la UI pueda llamar .replace()
+  // en el formateo de números. El servidor devuelve numbers, la UI espera strings.
+  const toStr = (val: any): string => {
+    if (val === null || val === undefined) return "";
+    return String(val);
+  };
+
   const unmapInsuranceItem = (item: any) => ({
     compania: item?.company || "",
     plan: item?.plan || "",
-    sumaAsegurada: item?.coverage_amount || "",
-    prima: item?.premium || "",
+    sumaAsegurada: toStr(item?.coverage_amount),
+    prima: toStr(item?.premium),
   });
 
   const unmapClientData = (data: any) => ({
@@ -731,11 +738,11 @@ export const FinancialProvider = ({ children }: { children: ReactNode }) => {
       conyugeFuma: data.profile?.spouse_smoker || false,
       conyugeHobbies: data.profile?.spouse_hobbies || "",
       conyugeDeporte: data.profile?.spouse_sport || "",
-      dependientes: (data.profile?.dependents || []).map((d: any) => ({
-        id: d.id,
-        nombre: d.name,
-        edad: d.age,
-        parentesco: d.relationship,
+      dependientes: (data.profile?.dependents || []).map((d: any, i: number) => ({
+        id: d.id || `dep-${Date.now()}-${i}`,
+        nombre: d.name || "",
+        edad: toStr(d.age),
+        parentesco: d.relationship || "",
         notas: d.notes || "",
       })),
       notaProteccion: data.profile?.note_protection || "",
@@ -745,35 +752,35 @@ export const FinancialProvider = ({ children }: { children: ReactNode }) => {
       notaSalud: data.profile?.note_health || "",
       notaRiesgos: data.profile?.note_risks || "",
     },
-    hijos: (data.children || []).map((h: any) => ({
-      id: h.id,
-      nombre: h.name,
-      edad: h.age,
-      universidad: h.university,
-      yearsFaltantes: h.years_remaining,
-      costoProyectado: h.projected_cost,
-      ahorroAnual: h.annual_savings,
+    hijos: (data.children || []).map((h: any, i: number) => ({
+      id: h.id || `hijo-${Date.now()}-${i}`,
+      nombre: h.name || "",
+      edad: toStr(h.age),
+      universidad: h.university || "",
+      yearsFaltantes: h.years_remaining ?? 0,
+      costoProyectado: h.projected_cost ?? 0,
+      ahorroAnual: h.annual_savings ?? 0,
     })),
     jubilacion: {
-      esperanzaVida: data.retirement?.life_expectancy || "",
-      edadRetiro: data.retirement?.retirement_age || "",
-      montoMensual: data.retirement?.monthly_amount || "",
-      edadActual: data.retirement?.current_age || "",
+      esperanzaVida: toStr(data.retirement?.life_expectancy),
+      edadRetiro: toStr(data.retirement?.retirement_age),
+      montoMensual: toStr(data.retirement?.monthly_amount),
+      edadActual: toStr(data.retirement?.current_age),
     },
     activos: {
-      ahorros: data.assets?.savings || "",
-      casa: data.assets?.house || "",
-      otrosInmuebles: data.assets?.other_properties || "",
-      vehiculos: data.assets?.vehicles || "",
-      inversiones: data.assets?.investments || "",
-      otros: data.assets?.other || "",
+      ahorros: toStr(data.assets?.savings),
+      casa: toStr(data.assets?.house),
+      otrosInmuebles: toStr(data.assets?.other_properties),
+      vehiculos: toStr(data.assets?.vehicles),
+      inversiones: toStr(data.assets?.investments),
+      otros: toStr(data.assets?.other),
     },
     pasivos: {
-      hipoteca: data.liabilities?.mortgage || "",
-      prestamos: data.liabilities?.loans || "",
-      tarjetas: data.liabilities?.credit_cards || "",
-      limiteCredito: data.liabilities?.credit_limit || "",
-      otros: data.liabilities?.other || "",
+      hipoteca: toStr(data.liabilities?.mortgage),
+      prestamos: toStr(data.liabilities?.loans),
+      tarjetas: toStr(data.liabilities?.credit_cards),
+      limiteCredito: toStr(data.liabilities?.credit_limit),
+      otros: toStr(data.liabilities?.other),
     },
     seguros: {
       individual: unmapInsuranceItem(data.insurance?.individual),
@@ -781,36 +788,36 @@ export const FinancialProvider = ({ children }: { children: ReactNode }) => {
       otros: unmapInsuranceItem(data.insurance?.other),
     },
     ingresos: {
-      titular: data.income?.holder || "",
-      conyuge: data.income?.spouse || "",
+      titular: toStr(data.income?.holder),
+      conyuge: toStr(data.income?.spouse),
       prestacionesTitular: data.income?.holder_benefits || "",
       prestacionesConyuge: data.income?.spouse_benefits || "",
     },
     gastosBasicos: {
-      servicios: data.fixed_expenses?.utilities || "",
-      vivienda: data.fixed_expenses?.housing || "",
-      alimentacion: data.fixed_expenses?.food || "",
-      colegios: data.fixed_expenses?.schools || "",
-      transporte: data.fixed_expenses?.transportation || "",
-      seguros: data.fixed_expenses?.insurance || "",
+      servicios: toStr(data.fixed_expenses?.utilities),
+      vivienda: toStr(data.fixed_expenses?.housing),
+      alimentacion: toStr(data.fixed_expenses?.food),
+      colegios: toStr(data.fixed_expenses?.schools),
+      transporte: toStr(data.fixed_expenses?.transportation),
+      seguros: toStr(data.fixed_expenses?.insurance),
     },
     gastosVariables: {
-      creditos: data.variable_expenses?.credit_payments || "",
-      recreacion: data.variable_expenses?.recreation || "",
-      entretenimiento: data.variable_expenses?.entertainment || "",
-      domestico: data.variable_expenses?.household || "",
-      salud: data.variable_expenses?.health || "",
-      otros: data.variable_expenses?.other || "",
+      creditos: toStr(data.variable_expenses?.credit_payments),
+      recreacion: toStr(data.variable_expenses?.recreation),
+      entretenimiento: toStr(data.variable_expenses?.entertainment),
+      domestico: toStr(data.variable_expenses?.household),
+      salud: toStr(data.variable_expenses?.health),
+      otros: toStr(data.variable_expenses?.other),
     },
     fallecimiento: {
-      gastosSepelio: data.death_expenses?.funeral_costs || "",
-      gastosIncapacidad: data.death_expenses?.disability_costs || "",
+      gastosSepelio: toStr(data.death_expenses?.funeral_costs),
+      gastosIncapacidad: toStr(data.death_expenses?.disability_costs),
     },
     detalle: {
-      otrosIngresos: data.plan_details?.other_income || "",
-      tasaInteres: data.plan_details?.interest_rate || "",
-      planProteccion: data.plan_details?.protection_plan || "",
-      planAhorro: data.plan_details?.savings_plan || "",
+      otrosIngresos: toStr(data.plan_details?.other_income),
+      tasaInteres: toStr(data.plan_details?.interest_rate),
+      planProteccion: toStr(data.plan_details?.protection_plan),
+      planAhorro: toStr(data.plan_details?.savings_plan),
     },
     cita: {
       dia: data.appointment?.day || "",
@@ -820,13 +827,13 @@ export const FinancialProvider = ({ children }: { children: ReactNode }) => {
       necesitaDecisionMaker: data.appointment?.needs_decision_maker || false,
       nombreDecisionMaker: data.appointment?.decision_maker_name || "",
     },
-    referidos: (data.referrals || []).map((r: any) => ({
-      id: r.id,
-      nombre: r.name,
-      edad: r.age,
+    referidos: (data.referrals || []).map((r: any, i: number) => ({
+      id: r.id || `ref-${Date.now()}-${i}`,
+      nombre: r.name || "",
+      edad: toStr(r.age),
       estadoCivil: r.marital_status || "",
-      ocupacion: r.occupation,
-      telefono: r.phone,
+      ocupacion: r.occupation || "",
+      telefono: r.phone || "",
       entorno: r.circle || "",
       grupoFamiliar: r.family_group || "",
     })),
@@ -944,7 +951,7 @@ export const FinancialProvider = ({ children }: { children: ReactNode }) => {
           // Si el prospecto recién sincronizado es el que está en pantalla, actualizamos currentServerId
           clientesPendientes.forEach((pend, idx) => {
             if (pend.id === currentClientId && returnedUuids[idx]) {
-               setCurrentServerId(returnedUuids[idx]);
+              setCurrentServerId(returnedUuids[idx]);
             }
           });
 
@@ -952,7 +959,7 @@ export const FinancialProvider = ({ children }: { children: ReactNode }) => {
             const syncIndex = clientesPendientes.findIndex(pend => pend.id === c.id);
             // Si el cliente estaba en la lista de pendientes y se mandó (syncIndex !== -1),
             // lo REMOVEMOS de localforage. Si no estaba (ej. es draft local reciente), se queda.
-            return syncIndex === -1; 
+            return syncIndex === -1;
           });
 
           // Persistimos dentro del updater de estado para asegurar la fuente de la verdad
@@ -1171,7 +1178,7 @@ export const FinancialProvider = ({ children }: { children: ReactNode }) => {
       }
     } catch (e: any) {
       console.error("Error al obtener la nube:", e);
-      showAlert(`Error al cargar la nube: ${e.message || "Fallo de red"}`);
+      showAlert(`Error al cargar los datos de la nube: ${e.message || "Fallo de red"}`);
     } finally {
       setIsFetchingCloud(false);
     }
@@ -1251,37 +1258,37 @@ export const FinancialProvider = ({ children }: { children: ReactNode }) => {
         if (storedDraft) {
           try {
             const draftObj = JSON.parse(storedDraft);
-            
-            const isEmptyDraft = !draftObj.currentClientId && 
-                                 !(draftObj.nombreCliente?.trim()) && 
-                                 !(draftObj.perfil?.telefono?.trim()) && 
-                                 !(draftObj.perfil?.ocupacion?.trim());
+
+            const isEmptyDraft = !draftObj.currentClientId &&
+              !(draftObj.nombreCliente?.trim()) &&
+              !(draftObj.perfil?.telefono?.trim()) &&
+              !(draftObj.perfil?.ocupacion?.trim());
 
             if (isEmptyDraft) {
-                // Borrar basura residual
-                localforage.removeItem("draft_prospect_v1");
+              // Borrar basura residual
+              localforage.removeItem("draft_prospect_v1");
             } else {
-                if (draftObj.currentClientId !== undefined) setCurrentClientId(draftObj.currentClientId);
-                if (draftObj.currentServerId !== undefined) setCurrentServerId(draftObj.currentServerId);
-                if (draftObj.nombreCliente) setNombreCliente(draftObj.nombreCliente);
-                if (draftObj.perfil) setPerfil(draftObj.perfil);
-                if (draftObj.hijos) setHijos(draftObj.hijos);
-                if (draftObj.jubilacion) setJubilacion(draftObj.jubilacion);
-                if (draftObj.activos) setActivos(draftObj.activos);
-                if (draftObj.pasivos) setPasivos(draftObj.pasivos);
-                if (draftObj.seguros) setSeguros(draftObj.seguros);
-                if (draftObj.ingresos) setIngresos(draftObj.ingresos);
-                if (draftObj.gastosBasicos) setGastosBasicos(draftObj.gastosBasicos);
-                if (draftObj.gastosVariables) setGastosVariables(draftObj.gastosVariables);
-                if (draftObj.fallecimiento) setFallecimiento(draftObj.fallecimiento);
-                if (draftObj.detalle) setDetalle(draftObj.detalle);
-                if (draftObj.cita) setCita(draftObj.cita);
-                if (draftObj.referidos) setReferidos(draftObj.referidos);
-                if (draftObj.notas) setNotas(draftObj.notas);
-                if (draftObj.piramideLevels) setPiramideLevels(draftObj.piramideLevels);
-                
-                // En vez de disparar el alert de inmediato, lo dejamos pendiente hasta que el usuario inicie sesión
-                setPendingDraftAlert(true);
+              if (draftObj.currentClientId !== undefined) setCurrentClientId(draftObj.currentClientId);
+              if (draftObj.currentServerId !== undefined) setCurrentServerId(draftObj.currentServerId);
+              if (draftObj.nombreCliente) setNombreCliente(draftObj.nombreCliente);
+              if (draftObj.perfil) setPerfil(draftObj.perfil);
+              if (draftObj.hijos) setHijos(draftObj.hijos);
+              if (draftObj.jubilacion) setJubilacion(draftObj.jubilacion);
+              if (draftObj.activos) setActivos(draftObj.activos);
+              if (draftObj.pasivos) setPasivos(draftObj.pasivos);
+              if (draftObj.seguros) setSeguros(draftObj.seguros);
+              if (draftObj.ingresos) setIngresos(draftObj.ingresos);
+              if (draftObj.gastosBasicos) setGastosBasicos(draftObj.gastosBasicos);
+              if (draftObj.gastosVariables) setGastosVariables(draftObj.gastosVariables);
+              if (draftObj.fallecimiento) setFallecimiento(draftObj.fallecimiento);
+              if (draftObj.detalle) setDetalle(draftObj.detalle);
+              if (draftObj.cita) setCita(draftObj.cita);
+              if (draftObj.referidos) setReferidos(draftObj.referidos);
+              if (draftObj.notas) setNotas(draftObj.notas);
+              if (draftObj.piramideLevels) setPiramideLevels(draftObj.piramideLevels);
+
+              // En vez de disparar el alert de inmediato, lo dejamos pendiente hasta que el usuario inicie sesión
+              setPendingDraftAlert(true);
             }
           } catch (e) {
             console.error("Error parsing draft", e);
@@ -1488,7 +1495,7 @@ export const FinancialProvider = ({ children }: { children: ReactNode }) => {
 
   const verificarLider = async () => {
     if (!advisor?.token) return;
-    
+
     // DEV MODE BYPASS
     if (advisor.id === "DEV-MODE") {
       setIsLider(advisor.isLider === true);
@@ -1499,9 +1506,9 @@ export const FinancialProvider = ({ children }: { children: ReactNode }) => {
     }
 
     if (!isOnline) {
-       // Si no hay red, confiamos en la propiedad cacheada en la sesión
-       setIsLider(advisor.isLider === true);
-       return;
+      // Si no hay red, confiamos en la propiedad cacheada en la sesión
+      setIsLider(advisor.isLider === true);
+      return;
     }
 
     // NUEVO ENFOQUE API V8:
@@ -1521,7 +1528,7 @@ export const FinancialProvider = ({ children }: { children: ReactNode }) => {
           setEquipoLider([]);
         }
       } catch {
-         setEquipoLider([]);
+        setEquipoLider([]);
       }
     } else {
       setIsLider(false);
