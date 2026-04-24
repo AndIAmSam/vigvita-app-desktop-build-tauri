@@ -7,6 +7,17 @@ pub fn run() {
     .plugin(tauri_plugin_updater::Builder::new().build())
     .plugin(tauri_plugin_process::init())
     .plugin(tauri_plugin_dialog::init())
+    .plugin(tauri_plugin_shell::init())
+    .on_page_load(|window, _payload| {
+      let _ = window.eval(r#"
+        window.open = function(url, target, features) {
+          if (window.__TAURI_INTERNALS__) {
+            window.__TAURI_INTERNALS__.invoke('plugin:shell|open', { path: url });
+          }
+          return null;
+        };
+      "#);
+    })
     .setup(|app| {
       let handle = app.handle().clone();
 

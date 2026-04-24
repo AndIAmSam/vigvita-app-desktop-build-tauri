@@ -993,7 +993,6 @@ export const FinancialProvider = ({ children }: { children: ReactNode }) => {
       const response = await fetch(`${API_BASE_URL}/api/profiles`, {
         method: "GET",
         headers: {
-          "Accept": "application/json",
           "Authorization": `Bearer ${advisor.token}`
         }
       });
@@ -1004,20 +1003,28 @@ export const FinancialProvider = ({ children }: { children: ReactNode }) => {
       }
 
       if (response.ok) {
-        let json;
-        try {
-          json = await response.json();
-        } catch (parseError) {
-          const rawText = await response.text();
-          console.error("Error parseando JSON de la nube:", rawText.substring(0, 200));
-          showAlert("El servidor devolvió un formato no válido.");
-          setIsFetchingCloud(false);
-          return;
+        const json = await response.json();
+        const profilesList = json.profiles || json.data || [];
+
+        // ============================================================
+        // API v9 — RESYNC DE EMERGENCIA
+        // Separar perfiles que el backend marcó como corruptos/perdidos
+        // de los que están bien.
+        // ============================================================
+        const profilesOk: any[] = [];
+        const profilesNeedResync: any[] = [];
+
+        for (const p of profilesList) {
+          if (p.needs_resync === true) {
+            profilesNeedResync.push(p);
+          } else {
+            profilesOk.push(p);
+          }
         }
 
-        const profiles = json.profiles || json.data || (Array.isArray(json) ? json : []);
-        
-        const mappedCloud = profiles.map((p: any) => {
+        // --- 1. Procesar perfiles que NO necesitan resync (flujo normal) ---
+        const mappedCloud = profilesOk.map((p: any) => {
+          // WebKit safe date parsing
           let safeDate = new Date();
           if (p.created_at) {
             const sanitized = p.created_at.toString().replace(" ", "T");
@@ -1033,18 +1040,78 @@ export const FinancialProvider = ({ children }: { children: ReactNode }) => {
             parsedData = {};
           }
 
+          let localStatus: "en_espera" | "descartado" | "cierre" = "en_espera";
+          if (p.status === "completed") localStatus = "cierre";
+          else if (p.status === "cancelled") localStatus = "descartado";
+
           return {
             id: p.id,
             serverId: p.id,
-            nombre: p.client_name || p.name || "Sin Nombre",
+            nombre: p.client_name || "Sin Nombre",
             fechaCreacion: safeDate.toLocaleDateString("es-MX"),
-            estatusAdquisicion: p.status || p.acquisition_status || "en_espera",
-            sincronizado: true, // Vienen de la nube
+            estatusAdquisicion: localStatus,
+            sincronizado: true,
             data: unmapClientData(parsedData)
           } as ClienteGuardado;
         });
 
         setListaNube(mappedCloud);
+
+        // --- 2. Procesar perfiles con needs_resync: true ---
+        if (profilesNeedResync.length > 0) {
+          let resyncCount = 0;
+          let noLocalCopyCount = 0;
+
+          setListaClientes((prev) => {
+            const updatedList = prev.map((localClient) => {
+              // Buscar si algún perfil del servidor que necesita resync
+              // coincide con este cliente local por su serverId
+              const match = profilesNeedResync.find(
+                (serverProfile) => serverProfile.id === localClient.serverId
+              );
+
+              if (match) {
+                resyncCount++;
+                // Marcar como NO sincronizado para que forceSync lo re-suba
+                // con la data local intacta y el serverId preservado (UPDATE, no CREATE)
+                return {
+                  ...localClient,
+                  sincronizado: false,
+                };
+              }
+              return localClient;
+            });
+
+            // Verificar cuántos perfiles del servidor no encontraron copia local
+            const localServerIds = new Set(prev.map(c => c.serverId).filter(Boolean));
+            noLocalCopyCount = profilesNeedResync.filter(
+              (sp) => !localServerIds.has(sp.id)
+            ).length;
+
+            // Persistir la lista actualizada con los flags de resync
+            localforage.setItem("clientes_db", JSON.stringify(updatedList)).catch(console.error);
+            return updatedList;
+          });
+
+          // Informar al usuario sobre la operación de resync
+          setTimeout(() => {
+            let msg = `⚠️ El servidor solicitó re-sincronizar ${profilesNeedResync.length} prospecto(s).`;
+            if (resyncCount > 0) {
+              msg += ` Se encontraron ${resyncCount} copia(s) local(es) que se re-enviarán automáticamente.`;
+            }
+            if (noLocalCopyCount > 0) {
+              msg += ` ${noLocalCopyCount} prospecto(s) no tienen copia local y no podrán recuperarse.`;
+            }
+            showAlert(msg);
+          }, 500);
+
+          // Disparar re-sincronización automática para subir las copias locales
+          if (resyncCount > 0) {
+            setTimeout(() => {
+              forceSync();
+            }, 1500);
+          }
+        }
       } else {
         showAlert(`No se pudieron obtener los datos (Status: ${response.status}).`);
       }
