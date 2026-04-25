@@ -148,6 +148,7 @@ export default function TableroCopiaScreen() {
                     if (r.nombre && r.nombre.trim() !== '') {
                         allRefs.push({
                             ...r,
+                            uniqueRefId: `${c.id || c.serverId || 'local'}-${r.id || Math.random()}`,
                             prospectoPadre: c.nombre,
                             fechaOrigen: c.fechaCreacion
                         });
@@ -579,7 +580,7 @@ export default function TableroCopiaScreen() {
                                 </View>
                             ) : (
                                 currentRefItems.map((ref, index) => (
-                                    <AnimatedReferidoRow key={ref.id || index.toString()} referido={ref} index={index} />
+                                    <AnimatedReferidoRow key={ref.uniqueRefId || ref.id || index.toString()} referido={ref} index={index} />
                                 ))
                             )}
 
@@ -780,7 +781,7 @@ export default function TableroCopiaScreen() {
                             <FontAwesome name="bullhorn" size={28} color={COLORS.azul1} />
                         </View>
                         <Text style={{ fontSize: 18, fontWeight: 'bold', color: COLORS.negro, marginBottom: 5 }}>Novedades</Text>
-                        <Text style={{ fontSize: 14, color: COLORS.textoGris, marginBottom: 15 }}>Versión 1.1.0</Text>
+                        <Text style={{ fontSize: 14, color: COLORS.textoGris, marginBottom: 15 }}>Versión 1.1.1</Text>
 
                         <ScrollView style={{ width: '100%', maxHeight: 350, marginBottom: 10, paddingRight: 5, borderBottomWidth: 1, borderBottomColor: '#f3f4f6' }} showsVerticalScrollIndicator={true}>
 
