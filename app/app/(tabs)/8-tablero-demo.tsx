@@ -489,20 +489,20 @@ export default function TableroCopiaScreen() {
                                     <Text style={styles.exportBtnText}>Sincronizar</Text>
                                 </TouchableOpacity> */}
                                 {!advisor?.training && (
-                                <TouchableOpacity
-                                    style={[styles.exportBtn, { marginLeft: 10, backgroundColor: COLORS.azul2, opacity: isFetchingCloud ? 0.7 : 1 }]}
-                                    onPress={fetchSincronizadosNube}
-                                    disabled={isFetchingCloud}
-                                >
-                                    {isFetchingCloud ? (
-                                        <ActivityIndicator size="small" color="#fff" />
-                                    ) : (
-                                        <FontAwesome name="cloud-download" size={14} color="#fff" />
-                                    )}
-                                    <Text style={styles.exportBtnText}>
-                                        {isFetchingCloud ? "Cargando..." : "Obtener mis ADNs"}
-                                    </Text>
-                                </TouchableOpacity>
+                                    <TouchableOpacity
+                                        style={[styles.exportBtn, { marginLeft: 10, backgroundColor: COLORS.azul2, opacity: isFetchingCloud ? 0.7 : 1 }]}
+                                        onPress={fetchSincronizadosNube}
+                                        disabled={isFetchingCloud}
+                                    >
+                                        {isFetchingCloud ? (
+                                            <ActivityIndicator size="small" color="#fff" />
+                                        ) : (
+                                            <FontAwesome name="cloud-download" size={14} color="#fff" />
+                                        )}
+                                        <Text style={styles.exportBtnText}>
+                                            {isFetchingCloud ? "Cargando..." : "Obtener mis ADNs"}
+                                        </Text>
+                                    </TouchableOpacity>
                                 )}
                                 {isTester && (
                                     <>
@@ -780,7 +780,7 @@ export default function TableroCopiaScreen() {
                             <FontAwesome name="bullhorn" size={28} color={COLORS.azul1} />
                         </View>
                         <Text style={{ fontSize: 18, fontWeight: 'bold', color: COLORS.negro, marginBottom: 5 }}>Novedades</Text>
-                        <Text style={{ fontSize: 14, color: COLORS.textoGris, marginBottom: 15 }}>Versión 1.0.18</Text>
+                        <Text style={{ fontSize: 14, color: COLORS.textoGris, marginBottom: 15 }}>Versión 1.1.0</Text>
 
                         <ScrollView style={{ width: '100%', maxHeight: 350, marginBottom: 10, paddingRight: 5, borderBottomWidth: 1, borderBottomColor: '#f3f4f6' }} showsVerticalScrollIndicator={true}>
 

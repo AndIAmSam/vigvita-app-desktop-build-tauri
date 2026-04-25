@@ -742,6 +742,28 @@ export const FinancialProvider = ({ children }: { children: ReactNode }) => {
     prima: toStr(item?.premium),
   });
 
+  const unmapReferralsList = (referralsData: any[]) => {
+    // La pantalla 7-referidos.tsx busca referidos por ID con formato "${entorno}-${index}".
+    // Ejemplo: "Familiar-0", "Personal-1", "Social-0", etc.
+    const rawRefs = (referralsData || []).map((r: any) => ({
+      nombre: r.name || r.nombre || "",
+      edad: toStr(r.age ?? r.edad),
+      estadoCivil: r.marital_status || r.estadoCivil || "",
+      ocupacion: r.occupation || r.ocupacion || "",
+      telefono: r.phone || r.telefono || "",
+      entorno: r.circle || r.entorno || "Personal",
+      grupoFamiliar: r.family_group || r.grupoFamiliar || "",
+    }));
+
+    const entornoCounters: Record<string, number> = {};
+    return rawRefs.map((ref: any) => {
+      const env = ref.entorno;
+      const idx = entornoCounters[env] || 0;
+      entornoCounters[env] = idx + 1;
+      return { ...ref, id: `${env}-${idx}` };
+    });
+  };
+
   const unmapClientData = (data: any) => ({
     perfil: {
       telefono: data.profile?.phone || "",
@@ -847,28 +869,7 @@ export const FinancialProvider = ({ children }: { children: ReactNode }) => {
       necesitaDecisionMaker: data.appointment?.needs_decision_maker || false,
       nombreDecisionMaker: data.appointment?.decision_maker_name || "",
     },
-    referidos: (() => {
-      // La pantalla 7-referidos.tsx busca referidos por ID con formato "${entorno}-${index}".
-      // Ejemplo: "Familiar-0", "Personal-1", "Social-0", etc.
-      // Agrupamos por entorno y asignamos índices secuenciales dentro de cada grupo.
-      const rawRefs = (data.referrals || []).map((r: any) => ({
-        nombre: r.name || "",
-        edad: toStr(r.age),
-        estadoCivil: r.marital_status || "",
-        ocupacion: r.occupation || "",
-        telefono: r.phone || "",
-        entorno: r.circle || "Personal",
-        grupoFamiliar: r.family_group || "",
-      }));
-
-      const entornoCounters: Record<string, number> = {};
-      return rawRefs.map((ref: any) => {
-        const env = ref.entorno;
-        const idx = entornoCounters[env] || 0;
-        entornoCounters[env] = idx + 1;
-        return { ...ref, id: `${env}-${idx}` };
-      });
-    })(),
+    referidos: unmapReferralsList(data.referrals || []),
     notas: data.notes || "",
     piramideLevels: (data.priority_levels || []).map((l: any) => ({
       id: l.id,
@@ -1099,7 +1100,11 @@ export const FinancialProvider = ({ children }: { children: ReactNode }) => {
               fechaCreacion: safeDate.toLocaleDateString("es-MX"),
               estatusAdquisicion: localStatus,
               sincronizado: true,
-              data: {}, // Vacío: se carga bajo demanda via GET /api/profiles/{id}
+              data: {
+                // API v11: Poblamos los referidos con el resumen directo del servidor.
+                // Soportamos 'referrals' (inglés/v11) o 'referidos' (español/legacy)
+                referidos: unmapReferralsList(p.referrals || p.referidos || [])
+              },
             };
 
             // "hecho para" — el líder ve para quién lo hizo
