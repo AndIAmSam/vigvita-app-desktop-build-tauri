@@ -1184,7 +1184,8 @@ export const FinancialProvider = ({ children }: { children: ReactNode }) => {
             return updatedList;
           });
 
-          // Informar al usuario sobre la operación de resync
+          // Informar al usuario sobre la operación de resync (Temporalmente silenciado a petición)
+          /*
           setTimeout(() => {
             let msg = `⚠️ El servidor solicitó re-sincronizar ${profilesNeedResync.length} prospecto(s).`;
             if (resyncCount > 0) {
@@ -1195,6 +1196,7 @@ export const FinancialProvider = ({ children }: { children: ReactNode }) => {
             }
             showAlert(msg);
           }, 500);
+          */
 
           // Disparar re-sincronización automática para subir las copias locales.
           // IMPORTANTE: skipCloudRefresh = true para evitar bucle infinito
