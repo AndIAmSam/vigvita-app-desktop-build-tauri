@@ -47,7 +47,7 @@ jobs:
           TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
           APPLE_SIGNING_IDENTITY: "-"
         with:
-          tagName: app-v__VERSION__
+          tagName: v__VERSION__
           releaseName: "Vigvita App v__VERSION__"
           releaseBody: "Vigvita App v__VERSION__ release."
           releaseDraft: true
@@ -65,7 +65,7 @@ jobs:
   #         GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
   #       run: |
   #         VERSION="${GITHUB_REF_NAME#v}"
-  #         RELEASE_TAG="app-v${VERSION}"
+  #         RELEASE_TAG="v${VERSION}"
 
   #         echo "Downloading latest.json from release ${RELEASE_TAG}..."
   #         gh release download "${RELEASE_TAG}" -p "latest.json" -R "${{ github.repository }}"
