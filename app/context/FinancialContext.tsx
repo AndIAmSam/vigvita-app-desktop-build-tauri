@@ -1898,15 +1898,54 @@ export const FinancialProvider = ({ children }: { children: ReactNode }) => {
   };
 
   const borrarCliente = async (id: string) => {
-    const nuevaLista = listaClientes.filter((c) => c.id !== id);
-    setListaClientes(nuevaLista);
-    await localforage.setItem("clientes_db", JSON.stringify(nuevaLista));
-    if (currentClientId === id) {
-      nuevoAnalisis(true); // Pasar flag para no mostrar la de "listo para nuevo prospecto"
+    // --- PASO 1: Resolver el serverId antes de modificar el estado ---
+    // Buscamos primero en la lista local; si no está ahí, buscamos en listaNube
+    // (un prospecto "solo nube" usa su serverId como id en el tablero).
+    const clienteLocal = listaClientes.find((c) => c.id === id);
+    const clienteNube = !clienteLocal ? listaNube.find((c) => c.id === id || c.serverId === id) : null;
+    const serverIdToDelete = clienteLocal?.serverId || clienteNube?.serverId || null;
+
+    // --- PASO 2: Borrado local inmediato (UX sin esperar al servidor) ---
+    if (clienteLocal) {
+      const nuevaLista = listaClientes.filter((c) => c.id !== id);
+      setListaClientes(nuevaLista);
+      await localforage.setItem("clientes_db", JSON.stringify(nuevaLista));
+      if (currentClientId === id) {
+        nuevoAnalisis(true); // No mostrar "listo para nuevo prospecto"
+      }
     }
-    setTimeout(() => {
-      showAlert("Prospecto eliminado exitosamente.");
-    }, 100);
+
+    // --- PASO 3: Notificar al servidor si el prospecto tiene serverId
+    //     y el usuario tiene sesión activa y no está en modo capacitación ---
+    if (serverIdToDelete && advisor?.token && !advisor.training) {
+      try {
+        const API_BASE_URL = process.env.EXPO_PUBLIC_API_URL || "https://vigvita.com.mx";
+        const res = await fetch(`${API_BASE_URL}/api/profiles/${serverIdToDelete}`, {
+          method: "DELETE",
+          headers: { "Authorization": `Bearer ${advisor.token}` },
+        });
+
+        if (res.ok || res.status === 404) {
+          // 200 = eliminado en servidor. 404 = ya no existía. Ambos son éxito.
+          // Limpiar de listaNube para que no reaparezca en el tablero
+          setListaNube((prev) => prev.filter((c) => c.serverId !== serverIdToDelete));
+          setTimeout(() => showAlert("Prospecto eliminado exitosamente."), 100);
+        } else if (res.status === 401 || res.status === 403) {
+          // Token inválido o expirado — forzar logout
+          await logout();
+        } else {
+          // Error inesperado del servidor (5xx, etc.)
+          // El borrado local ya ocurrió; informar sin revertir
+          setTimeout(() => showAlert("Prospecto eliminado localmente. No se pudo confirmar la eliminación en el servidor, intenta sincronizar."), 100);
+        }
+      } catch (e) {
+        // Sin internet o error de red — el borrado local ya ocurrió
+        setTimeout(() => showAlert("Prospecto eliminado de tu dispositivo. Sin conexión: el servidor será notificado cuando recuperes internet."), 100);
+      }
+    } else {
+      // Sin serverId (nunca sincronizado) o modo training: solo borrado local
+      setTimeout(() => showAlert("Prospecto eliminado exitosamente."), 100);
+    }
   };
 
   const nuevoAnalisis = (silencioso = false) => {

@@ -101,7 +101,7 @@ export default function JubilacionScreen() {
     return -pmt * ((1 - Math.pow(1 + rate, -nper)) / rate);
   };
 
-  const tasaRendimientoRetiro = 0.051; // 5.1%
+  const tasaRendimientoRetiro = 0.08; // 8%
   const ahorroMetaReal = calculatePV(
     tasaRendimientoRetiro / 12,
     mesesRetiro,
@@ -382,7 +382,7 @@ export default function JubilacionScreen() {
 
             <View style={{ alignItems: "center" }}>
               <Text style={styles.summaryLabel}>
-                RESERVA REQUERIDA (CON 5.1% RENDIMIENTO)
+                RESERVA REQUERIDA (CON 8% RENDIMIENTO)
               </Text>
               <Text style={styles.mediumTotal}>
                 {formatMoney(ahorroMetaReal)}
