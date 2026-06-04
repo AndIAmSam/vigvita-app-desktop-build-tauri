@@ -1,0 +1,1967 @@
+global_specs:
+  scope: "/*"
+
+  constraints:
+    max_body_size: 5mb
+    max_header_size: 1mb
+    timeout:
+      read: 5s
+      read_headers: 5s
+      write: 5s
+      idle: 60s
+
+    on_request_limit_exceeded:
+      action: "Connection Termination"
+      description: "The server will forcefully close the TCP connection to prevent resource exhaustion."
+
+  # Standard responses for any endpoint
+  default_responses:
+    500:
+      contentType: text/plain
+      body: "Internal server error"
+      reason: "Unexpected server-side failure"
+
+global_post_specs:
+  scope: "POST /*"
+
+  # Standar requirements for any POST endpoint
+  request:
+    contentType: application/json
+
+  # Standard responses for any POST endpoint
+  response:
+    400:
+      - contentType: text/plain
+        body: Bad Request
+        reason: The HTTP request body is malformed or cannot be parsed
+
+    422:
+      - contentType: application/json
+        reason: |
+			The JSON is well-formed but cannot be processed. This includes invalid data types (e.g., sending an integer instead of a string)
+			or business validation failures (e.g., invalid email format, missing required fields).
+        body: { "errors": { "field_name": "error_slug" } }
+
+permissions:
+  auth:
+    description: "Verifies user session using Authorization (Bearer <token>) header or (session) cookie."
+    on_failure:
+      status: 404
+      contentType: "text/html"
+
+  super_admin:
+    description: "Restricts access to users with the SuperAdmin role."
+    on_failure:
+      status: 404
+      contentType: "text/html"
+
+  human_resources:
+    description: "Restricts access to users with the HumanResources role."
+    on_failure:
+      status: 404
+      contentType: "text/html"
+
+  team_leader:
+    description: "Restricts access to users with the TeamLeader role."
+    on_failure:
+      status: 404
+      contentType: "text/html"
+
+  advisor:
+    description: "Restricts access to users with the Advisor role."
+    on_failure:
+      status: 404
+      contentType: "text/html"
+
+  operations:
+    description: "Restricts access to users with the Operations role."
+    on_failure:
+      status: 404
+      contentType: "text/html"
+
+  billing:
+    description: "Restricts access to users with the Billing role."
+    on_failure:
+      status: 404
+      contentType: "text/html"
+
+roles:
+  description: "Application roles available to the frontend. Returned as the 'role' field on user objects."
+  values:
+    SuperAdmin:
+      description: "Full system access. Manages users, roles, and global configuration."
+    TeamLeader:
+      description: "Manages a team of advisors. Can view and manage their team's client profiles."
+    Advisor:
+      description: "Front-line sales role. Creates and manages client profiles (ADNs) and policy applications."
+    Advisor_Trainee:
+      description: "Trainee version of Advisor. Limited access while in training."
+    HumanResources:
+      description: "HR department role. Can update user names and advisor details (key, status, month zero). All changes are audit-logged."
+    Operations:
+      description: "Policy administration role. Converts applications into policies and manages their status lifecycle."
+    Billing:
+      description: "Collections and finance role. Views and edits all policy receipts, and creates policy renewals."
+
+/api/signup:
+  request:
+    method: POST
+    body:
+      name:
+        required: true
+        min: 5
+        max: 255
+      email:
+        required: true
+        max: 255
+      password:
+        required: true
+        min: 8
+        max: 255
+      token:
+        required: true
+
+  responses:
+    201:
+      - contentType: application/json
+        reason: User created successfully and invitation marked as used
+        body: { "status": "success" }
+
+    403:
+      - contentType: application/json
+        reason: The token hash does not match any active invitation or is already accepted/expired
+        body: {"error": "invalid_token"}
+
+      - contentType: application/json
+        reason: The provided email does not match the email associated with the token
+        body: {"error": "email_mismatch"}
+
+    422:
+      - contentType: application/json
+        reason: One or more fields failed format validation (email format, password length, etc)
+        body: { "errors": { "field_name": "error_slug" } }
+
+/api/login:
+  request:
+    method: POST
+    query:
+      api:
+        required: false
+        type: boolean
+        description: "If set to 'true', injects additional app-specific metadata into the response such as 'training' and 'is_leader'."
+    body:
+      email:
+        required: true
+      password:
+        required: true
+
+  responses:
+    200:
+      - contentType: application/json
+        reason: Credentials verified and session created
+        body:
+          token: string
+          name:
+            type: string
+            description: User's full name.
+          redirect:
+            type: string
+            description: |
+              The URL to which the server determines the user must be redirected
+              based on their assigned role (e.g., /coming-soon, /admin/dashboard).
+          training:
+            type: boolean
+            required: false
+            description: |
+              This property will ONLY be injected (when ?api=true) and be exclusively true if the authenticated user
+              holds the Advisor_Trainee role. Indicates learning limitations in place.
+          is_leader:
+            type: boolean
+            required: false
+            description: |
+              This property will ONLY be injected (when ?api=true) and be exclusively true if the authenticated user
+              holds the TeamLeader or SuperAdmin role. Used by the desktop app to toggle leader-specific menus.
+
+    401:
+      - contentType: application/json
+        reason: "The email doesn't exist or the password is incorrect"
+        body: { "error": "invalid_credentials" }
+
+    403:
+      - contentType: application/json
+        reason: "The user's access period (employment_period) has expired"
+        body: { "error": "employment_period_ended" }
+
+    422:
+      - contentType: application/json
+        reason: "Required fields are missing or empty"
+        body: { "error": "missing_required_fields" }
+
+/api/user:
+  permissions: [auth, super_admin]
+
+  request:
+    method: POST
+    body:
+      email:
+        required: true
+      role:
+        required: true
+        type: string
+        description: "Must match a valid system role (e.g., SuperAdmin, TeamLeader, Advisor, AdvisorTrainee)"
+      leader:
+        required: false
+        type: string
+        description: "Email of an existing and active user"
+
+  responses:
+    201:
+      - contentType: application/json
+        reason: Invitation created successfully and token generated
+        body: { "status": "success" }
+
+    400:
+      - contentType: application/json
+        reason: The provided leader email does not exist
+        body: { "error": "invalid_leader" }
+
+    422:
+      - contentType: application/json
+        reason: Email format is invalid or the role does not exist in the system
+        body: { "errors": { "field_name": "error_slug" } }
+
+/api/forgot-password:
+  request:
+    method: POST
+    body:
+      email:
+        required: true
+        type: string
+        description: "The user's registered email address."
+
+  responses:
+    200:
+      - contentType: application/json
+        reason: |
+          Request received. To prevent email enumeration, this endpoint returns
+          a success message regardless of whether the email exists in the system or not.
+        body: { "status": "success" }
+
+/api/dashboard-global:
+  permissions: [auth, super_admin]
+
+  request:
+    method: GET
+    query:
+      preset:
+        required: true
+        type: string
+        enum: [week, month, q1, q2, q3, q4, last_6_months, year, custom]
+        description: |
+          Date range preset:
+          - week: Monday of the current week → end of today.
+          - month: 1st of the current month → end of today.
+          - q1: Jan 1 – Mar 31 of the current year.
+          - q2: Apr 1 – Jun 30 of the current year.
+          - q3: Jul 1 – Sep 30 of the current year.
+          - q4: Oct 1 – Dec 31 of the current year.
+          Selecting a future quarter returns 422. If the quarter is in progress, end date is capped to today.
+          - last_6_months: 1st of the month 5 months ago → end of today (grouped monthly).
+          - year: Jan 1 of the current year → end of today.
+          - custom: Uses start_date and end_date. End date is capped to today if in the future.
+      start_date:
+        required: conditional
+        type: string
+        format: YYYY-MM-DD
+        description: "Only required when preset is 'custom'. Must be on or after 2026-01-01."
+      end_date:
+        required: conditional
+        type: string
+        format: YYYY-MM-DD
+        description: "Only required when preset is 'custom'. Must be on or after 2026-01-01, >= start_date. If in the future, it is silently capped to today."
+
+  responses:
+    200:
+      - contentType: application/json
+        reason: "Returns global dashboard statistics, KPIs, and charts properly aggregated."
+        body:
+          kpis:
+            total_profiles:
+              type: integer
+              example: 100
+            closed:
+              type: integer
+              example: 40
+            in_process:
+              type: integer
+              example: 60
+            cancelled:
+              type: integer
+              example: 5
+            effectiveness:
+              type: float
+              example: 40.0
+            total_referrals:
+              type: integer
+              example: 20
+            referrals_per_closed:
+              type: float
+              example: 0.5
+            unaccompanied:
+              type: integer
+              description: "Profiles created with accompaniment_status 'unaccompanied' (Sin acompañamiento)."
+              example: 50
+            demonstration:
+              type: integer
+              description: "Profiles created with accompaniment_status 'demonstration' (Demostración)."
+              example: 30
+            observation:
+              type: integer
+              description: "Profiles created with accompaniment_status 'observation' (Observación)."
+              example: 20
+          timeline_array:
+            type: array
+            items:
+              date:
+                type: string
+                description: "Format depends on date range duration (e.g. '02 Jan' for <= 32 days or 'Jan 2006' for > 32 days)"
+                example: "01 Jan"
+              created:
+                type: integer
+                example: 10
+              closed:
+                type: integer
+                example: 4
+          chart_data_pie:
+            type: array
+            items:
+              name:
+                type: string
+                description: "Either 'Closed', 'Pending', or 'Cancelled'"
+                example: "Closed"
+              value:
+                type: integer
+                example: 40
+          top_generated:
+            type: array
+            items:
+              name:
+                type: string
+                example: "Advisor 1"
+              generated:
+                type: integer
+                example: 30
+          top_closed:
+            type: array
+            items:
+              name:
+                type: string
+                example: "Advisor 1"
+              closed:
+                type: integer
+                example: 15
+          top_referrals:
+            type: array
+            items:
+              name:
+                type: string
+                example: "Advisor 1"
+              referrals:
+                type: integer
+                example: 5
+          advisors:
+            type: array
+            items:
+              name:
+                type: string
+                example: "Advisor 1"
+              id:
+                type: UUID
+
+    422:
+      - contentType: application/json
+        reason: "Invalid date presets or error parsing custom start/end dates."
+        body:
+        error: "Invalid dates"
+
+/api/profiles/new:
+  permissions: [auth, super_admin, team_leader, advisor]
+  request:
+    method: POST
+    body:
+      clients:
+        type: array
+        description: "A list of client objects to be created. Minimum of 1 client."
+        items:
+          id:
+            required: false
+            description: |
+              When sent, it must be a valid UUID representing the profile ID to be updated;
+              if it is not included or does not match an existing profile, a new profile will be created and the provided UUID will be ignored
+          advisor_id:
+            required: false
+            type: string
+            format: uuid
+            description: |
+              When optionally sent, specifies the exact UUID of an existing advisor that this ADN should be attributed to.
+              A strictly enforced authorization check verifies whether the current logged-in user possesses leadership over the matching target advisor_id.
+          name:
+            required: true
+            type: string
+            description: "The name of the client. Must be between 1 and 100 characters."
+            example: "Juan Pérez"
+          created_at:
+            required: false
+            type: string
+            format: date-time
+            description: "Timestampt of creation (if not provided, it will be mapped correctly at insertion to server's time)."
+            example: "2026-03-10T15:00:00Z"
+          is_closed:
+            required: false
+            type: boolean
+            description: "Whether the profile was closed."
+            example: false
+          acquisition_status:
+            required: true
+            type: string
+            description: "Current status of the profile acquisition. Must be one of: 'pending', 'cancelled', 'completed'."
+            example: "pending"
+          accompaniment_status:
+            required: true
+            type: string
+            enum: [unaccompanied, demonstration, observation]
+            description: |
+              How the advisor handled the profile during creation. Required.
+              Feeds the global and per-advisor dashboard breakdowns.
+              Values: 'unaccompanied', 'demonstration', 'observation'.
+            example: "unaccompanied"
+          closing_types:
+            required: false
+            type: array
+            items:
+              type: string
+            description: "Types of policies or plans closed for this client."
+          data:
+            required: false
+            type: object
+            description: "Detailed client data payload including Profile, Referrals, Assets, Insurance, etc. Stored encrypted in the database."
+            $ref: '#/components/schemas/ClientData'
+
+  responses:
+    201:
+      - contentType: application/json
+        reason: "Client profiles created successfully."
+        body:
+          data:
+            type: array
+            description: "Returns an array containing the UUIDs generated for the NEWLY inserted clients."
+            items:
+              type: string
+              format: uuid
+              example: "123e4567-e89b-12d3-a456-426614174000"
+    403:
+      - contentType: application/json
+        reason: "The authenticated user is not authorized to attribute the ADN to the requested advisor_id."
+        body: { "error": "not_authorized_for_advisor" }
+    404:
+      - contentType: application/json
+        reason: "One or more of the specified advisor_ids could not be found."
+        body: { "error": "some_advisors_not_found" }
+    422:
+      - contentType: application/json
+        reason: "Validation error. Client name is missing, name exceeds 100 characters, classification exceeds 50 characters, acquisition status is not within the valid enum, or accompaniment status is missing or not within the valid enum."
+        body:
+          errors:
+            "clients[0].name": "required|too_long"
+            "clients[0].acquisition_status": "invalid"
+            "clients[0].accompaniment_status": "required|invalid"
+
+      - contentType: application/json
+        reason: "No clients sent."
+        body:
+          errors:
+            "clients": "required"
+
+/api/hr/users:
+  permissions: [auth, human_resources]
+
+  request:
+    method: GET
+
+  response:
+    200:
+      - contentType: application/json
+        reason: "Returns a list of all users that HumanResources is allowed to edit (Advisor, Advisor_Trainee, TeamLeader, SuperAdmin) along with their advisor details if applicable."
+        body:
+          users:
+            - id: "uuid-string"
+              name: "Juan Perez"
+              advisor_key: 12345
+              status: "active"
+              month_zero: "2026-05-01" | null
+
+/api/hr/advisor/{id}:
+  permissions: [auth, human_resources]
+
+  request:
+    method: PATCH
+    body:
+      advisor_key:
+        required: false
+        type: integer
+        description: "Must be greater than 0."
+      status:
+        required: false
+        type: string
+        enum: [active, inactive, pre_connected, connected]
+      month_zero:
+        required: false
+        type: string
+        format: "YYYY-MM-DD"
+        description: "The advisor's starting month. Send null or empty string to clear."
+      reason:
+        required: true
+        type: string
+        max: 255
+        description: "Brief explanation of why the change is being made. Stored in the audit log."
+
+  response:
+    200:
+      - contentType: application/json
+        reason: "Advisor details updated. Each changed field is recorded in the advisor_change_log with old/new value and reason. Applies to users with roles: Advisor, Advisor_Trainee, TeamLeader, SuperAdmin."
+        body:
+          status: "success"
+    404:
+      - contentType: text/plain
+        reason: "Target user not found, deleted, or does not have an eligible role (Advisor, Advisor_Trainee, TeamLeader, SuperAdmin)."
+    422:
+      - contentType: application/json
+        reason: |
+          Validation failed. Possible field errors:
+          - reason: required, too_long
+          - body: at_least_one_field_required (none of advisor_key, status, or month_zero was provided)
+          - status: invalid (not in enum)
+          - advisor_key: invalid (<= 0)
+          - month_zero: invalid (bad date format)
+        body:
+          errors: object
+
+/api/profiles:
+  permissions: [auth, super_admin, team_leader, advisor]
+
+  request:
+    method: GET
+
+  response:
+    200:
+      - contentType: application/json
+        reason: "Returns a summary list of all ADNs (Client Profiles) where the authenticated user is involved either as the assigned advisor or as the creator."
+        body:
+          profiles:
+            - id: "uuid-string"
+              client_name: "Juan Perez"
+              status: "pending"
+              created_at: "2026-04-22T00:00:00Z"
+              needs_resync:
+                type: boolean
+                description: "If true, the server's encrypted data for this profile is corrupted or missing. The client should NOT delete local data and must re-send the profile to restore it."
+                example: false
+              referrals:
+                type: array
+                items:
+                  $ref: '#/components/schemas/Referral'
+              relationship:
+                created_by: "Name of the creator (if created by a leader for this advisor)"
+                created_for: "Name of the advisor (if created by this leader for an advisor)"
+
+/api/profiles/{id}:
+  permissions: [auth, super_admin, team_leader, advisor]
+
+  request:
+    method: GET
+
+  response:
+    200:
+      - contentType: application/json
+        reason: "Returns a single client profile with its full decrypted data payload."
+        body:
+          id: "uuid-string"
+          client_name: "Juan Perez"
+          status: "pending"
+          created_at: "2026-04-22T00:00:00Z"
+          needs_resync:
+            type: boolean
+            description: "If true, the server's encrypted data for this profile is corrupted or missing. The client should NOT delete local data and must re-send the profile to restore it."
+            example: false
+          relationship:
+            created_by: "Name of the creator (if created by a leader for this advisor)"
+            created_for: "Name of the advisor (if created by this leader for an advisor)"
+          data:
+            $ref: '#/components/schemas/ClientData'
+    404:
+      - contentType: text/plain
+        reason: "Profile not found or not accessible by the user."
+
+  delete:
+    method: DELETE
+    permissions: [auth, super_admin, team_leader, advisor]
+
+    response:
+      200:
+        - contentType: application/json
+          reason: "Profile deleted successfully (soft delete)."
+          body:
+            message: "Profile deleted successfully"
+      404:
+        - contentType: text/plain
+          reason: "Profile not found or not accessible by the user."
+
+/api/dashboard/a/{id}:
+  permissions: [auth, super_admin]
+
+  request:
+    method: GET
+    query:
+      preset:
+        required: true
+        type: string
+        enum: [week, month, q1, q2, q3, q4, last_6_months, year, custom]
+        description: |
+          Date range preset:
+          - week: Monday of the current week → end of today.
+          - month: 1st of the current month → end of today.
+          - q1: Jan 1 – Mar 31 of the current year.
+          - q2: Apr 1 – Jun 30 of the current year.
+          - q3: Jul 1 – Sep 30 of the current year.
+          - q4: Oct 1 – Dec 31 of the current year.
+          Selecting a future quarter returns 422. If the quarter is in progress, end date is capped to today.
+          - last_6_months: 1st of the month 5 months ago → end of today (grouped monthly).
+          - year: Jan 1 of the current year → end of today.
+          - custom: Uses start_date and end_date. End date is capped to today if in the future.
+      start_date:
+        required: conditional
+        type: string
+        format: YYYY-MM-DD
+        description: "Only required when preset is 'custom'. Must be on or after 2026-01-01."
+      end_date:
+        required: conditional
+        type: string
+        format: YYYY-MM-DD
+        description: "Only required when preset is 'custom'. Must be on or after 2026-01-01, >= start_date. If in the future, it is silently capped to today."
+
+  responses:
+    200:
+      - contentType: application/json
+        reason: "Returns advisor-specific dashboard statistics, KPIs, and charts properly aggregated based on the requested date range."
+        body:
+          kpis:
+            advisor_name:
+              type: string
+              example: "Juan Pérez"
+            generated_count:
+              type: integer
+              example: 45
+            closed:
+              type: integer
+              example: 15
+            in_process:
+              type: integer
+              example: 30
+            cancelled:
+              type: integer
+              example: 5
+            referrals_count:
+              type: integer
+              example: 10
+            unaccompanied:
+              type: integer
+              description: "Profiles created with accompaniment_status 'unaccompanied' (Sin acompañamiento)."
+              example: 20
+            demonstration:
+              type: integer
+              description: "Profiles created with accompaniment_status 'demonstration' (Demostración)."
+              example: 15
+            observation:
+              type: integer
+              description: "Profiles created with accompaniment_status 'observation' (Observación)."
+              example: 10
+          timeline_array:
+            type: array
+            items:
+              date:
+                type: string
+                description: "Format depends on date range duration (e.g. '02 Jan' for <= 32 days or 'Jan 2006' for > 32 days)"
+                example: "01 Jan"
+              created:
+                type: integer
+                example: 8
+              closed:
+                type: integer
+                example: 3
+          chart_data_pie:
+            type: array
+            items:
+              name:
+                type: string
+                description: "Either 'Closed', 'Pending', or 'Cancelled'"
+                example: "Closed"
+              value:
+                type: integer
+                example: 15
+
+    404:
+      - contentType: text/plain
+        reason: "The requested advisor UUID was not found in the database."
+        body: "Not Found\n"
+
+    422:
+      - contentType: application/json
+        reason: "Invalid date presets, error parsing custom start/end dates, or dates out of allowed bounds."
+        body:
+          error: "Invalid dates"
+
+
+/api/reset-password:
+  request:
+    method: POST
+    body:
+      token:
+        required: true
+        type: string
+        description: "The reset token sent to the user's email."
+      password:
+        required: true
+        min: 8
+        max: 255
+        type: string
+        description: "The new password for the account."
+
+  responses:
+    200:
+      - contentType: application/json
+        reason: "Password updated successfully and reset token consumed/deleted."
+        body: { "status": "success" }
+
+    422:
+      - contentType: application/json
+        reason: "The reset token is invalid, does not exist, or has expired."
+        body: { "error": "invalid_token" }
+
+      - contentType: application/json
+        reason: "One or more fields failed format validation (e.g., missing token, password length)."
+        body: { "errors": { "field_name": "error_slug" } }
+
+/api/users:
+  permissions: [auth, super_admin]
+
+  request:
+    method: GET
+    description: "Fetches a comprehensive list of all active users and pending invitations in the system."
+
+  responses:
+    200:
+      - contentType: application/json
+        reason: "Successfully retrieved users and invitations."
+        body:
+          data:
+            type: object
+            properties:
+              users:
+                type: array
+                description: "List of all active users in the system (deleted users are excluded)."
+                items:
+                  type: object
+                  properties:
+                    name:
+                      type: string
+                      example: "Ana García"
+                    email:
+                      type: string
+                      format: email
+                      example: "ana@example.com"
+                    id:
+                      type: string
+                      format: uuid
+                      description: "The user's public UUID."
+                    leader_id:
+                      type: string
+                      format: uuid
+                      nullable: true
+                      description: "The public UUID of the user's leader, if assigned."
+                    role_name:
+                      type: string
+                      description: "The resolved human-readable role name (e.g., 'TeamLeader', 'Advisor', 'AdvisorTrainee')."
+                    access_expires_at:
+                      type: string
+                      format: date-time
+                      nullable: true
+                      description: "Timestamp indicating when the user's access is revoked, if applicable."
+
+              invitations:
+                type: array
+                description: "List of pending invitations (accepted invitations are excluded)."
+                items:
+                  type: object
+                  properties:
+                    email:
+                      type: string
+                      format: email
+                      description: "The email address the invitation was sent to."
+                    created_at:
+                      type: string
+                      format: date-time
+                      description: "When the invitation was generated."
+                    expires_at:
+                      type: string
+                      format: date-time
+                      description: "When the invitation token expires."
+                    role_name:
+                      type: string
+                      description: "The resolved human-readable role name assigned to this invitation."
+                    leader_name:
+                      type: string
+                      nullable: true
+                      description: "The name of the leader assigned to this invited user, if any."
+
+/api/user/{id}:
+  permissions: [auth, super_admin]
+
+  request:
+    method: PATCH
+    description: "Partially updates an active user's role, leader, or access status. At least one field is required."
+    body:
+      role:
+        required: false
+        type: string
+        description: "Must match a valid system role (e.g., 'TeamLeader', 'Advisor', 'AdvisorTrainee')."
+      leader:
+        required: false
+        type: string
+        description: "The public UUID of an existing user to act as the leader. Send an empty string ('') to unassign the current leader."
+      revoke_access:
+        required: false
+        type: boolean
+        description: "If true, revokes the user's access after 5 days. If false, restores access (sets access_expires_at to null)."
+
+  responses:
+    200:
+      - contentType: application/json
+        reason: "The user was successfully updated."
+        body: { "status": "success" }
+
+    404:
+      - contentType: text/plain
+        reason: "Invalid user UUID format or user not found."
+        body: "Not Found\n"
+
+    422:
+      - contentType: application/json
+        reason: "Validation failed (e.g., missing all fields, role doesn't exist, or leader UUID is invalid/not found)."
+        body:
+          errors:
+            "body": "at_least_one_field_required"
+            "role": "invalid"
+            "leader": "invalid_leader"
+            "leader": "invalid"
+
+    403:
+      - contentType: application/json
+        reason: "The target user is the SuperAdmin. No modifications are allowed on this account."
+        body: { "error": "cannot_modify_super_admin" }
+
+/api/team:
+  permissions: [auth, super_admin, team_leader]
+  request:
+    method: GET
+    description: "Returns the id and name of all active users exactly assigned to the current user's direct subordindate team."
+  responses:
+    200:
+      - contentType: application/json
+        reason: "Successful retrieval of team members."
+        body:
+          data:
+            type: array
+            description: "List of team member objects."
+            items:
+              type: object
+              properties:
+                id:
+                  type: string
+                  format: uuid
+                  description: "Member's public UUID."
+                name:
+                  type: string
+                  description: "Full name of the member."
+
+/api/policy/initiate:
+  permissions: [auth, super_admin, team_leader, advisor]
+  request:
+    method: POST
+    contentType: application/json
+    description: |
+      Creates a policy application (solicitud de póliza). This is the first step before
+      a full policy is created. Advisors, TeamLeaders, and SuperAdmins can initiate
+      applications. Operations then processes them via POST /api/policy.
+    body:
+      application_folio:
+        required: true
+        type: string
+        max: 50
+        description: "Must be unique. Duplicate folios return 422."
+      contractor_first_name:
+        required: true
+        type: string
+        max: 100
+      contractor_second_name:
+        required: false
+        type: string
+        max: 100
+      contractor_paternal_last_name:
+        required: true
+        type: string
+        max: 100
+      contractor_maternal_last_name:
+        required: true
+        type: string
+        max: 100
+      insurance_branch:
+        required: true
+        type: string
+        enum: [life, major_medical]
+      product:
+        required: true
+        type: string
+        enum: [medicalife_familiar_ejecutivo, medicalife_familiar_mas, medicalife_familiar_basico, medicalife_familiar_practico, medicalife_familiar_conversion, primordial, metalife_mujer, metalife_tu_futuro, metalife_educacion, metalife_retiro, perfeclife, tempolife, totalife, horizonte, flexilife_inversion, flexilife_suenos, educalife, tempolife_grandes_sumas, tempolife_preferente, met4u]
+      payment_frequency:
+        required: true
+        type: string
+        enum: [annual, semiannual, quarterly, bimonthly, monthly]
+      payment_method:
+        required: true
+        type: string
+        description: |
+          Direct channel: call_center, next_pay, portal, spei, bank_teller, codi.
+          Automatic channel: clabe, amex, credit_card, debit_card, portal_msi, next_pay_msi.
+      basic_premium:
+        required: true
+        type: float
+        description: "Must be greater than 0."
+      additional_premium:
+        required: conditional
+        type: float
+        description: "Required for Metalife-family products (product identifier starts with 'metalife'). Must be >= 0."
+
+  responses:
+    201:
+      - contentType: application/json
+        reason: "Application created successfully."
+        body:
+          status: "success"
+          application_id: string (uuid)
+    422:
+      - contentType: application/json
+        reason: |
+          Validation failed. Possible field errors:
+          - application_folio: required, too_long, already_exists (duplicate)
+          - contractor_first_name: required, too_long
+          - contractor_second_name: too_long
+          - contractor_paternal_last_name: required, too_long
+          - contractor_maternal_last_name: required, too_long
+          - insurance_branch: invalid
+          - product: invalid
+          - payment_frequency: invalid
+          - payment_method: invalid
+          - basic_premium: required (missing or <= 0)
+          - additional_premium: required (for Metalife-family products, identifier starts with 'metalife')
+        body:
+          errors: object
+
+/api/policy/applications:
+  permissions: [auth, operations]
+  request:
+    method: GET
+    description: "Returns all policy applications that have not yet been converted into a policy."
+  responses:
+    200:
+      - contentType: application/json
+        reason: "Returns the list of pending applications."
+        body:
+          applications:
+            type: array
+            items:
+              id:
+                type: string
+                format: uuid
+                description: |
+                  Application public UUID. Used as application_id when creating a policy
+                  (POST /api/policy) and as the {id} path parameter for the application chat
+                  (e.g. GET /api/applications/{id}/chat/messages).
+              application_folio: string
+              contractor_full_name: string
+              insurance_branch:
+                type: string
+                enum: [life, major_medical]
+              product:
+                type: string
+                enum: [medicalife_familiar_ejecutivo, medicalife_familiar_mas, medicalife_familiar_basico, medicalife_familiar_practico, medicalife_familiar_conversion, primordial, metalife_mujer, metalife_tu_futuro, metalife_educacion, metalife_retiro, perfeclife, tempolife, totalife, horizonte, flexilife_inversion, flexilife_suenos, educalife, tempolife_grandes_sumas, tempolife_preferente, met4u]
+              payment_frequency:
+                type: string
+                enum: [annual, semiannual, quarterly, bimonthly, monthly]
+              payment_method: string
+              basic_premium: float
+              additional_premium: float | null
+              created_at: string (datetime)
+              created_by_name: string
+
+/api/policy:
+  permissions: [auth, operations]
+  request:
+    method: POST
+    contentType: application/json
+    description: |
+      Converts an existing policy application into a full policy.
+      Most fields (contractor name, insurance_branch, product, payment_frequency, payment_method)
+      are inherited from the application; they can be optionally overridden here.
+      The advisor is always inherited from the application (the advisor who created it)
+      and cannot be set or overridden here.
+      Any files the advisor attached to the application are promoted into the application chat
+      as 'pdf' messages within the same transaction (the S3 objects are reused, not copied).
+      The application chat itself becomes read-only as soon as this policy exists — clients can
+      still GET messages and files, but POST /api/applications/{id}/chat/files and any frames
+      sent over the WebSocket are rejected/dropped.
+      Receipts are NOT generated on creation — they are generated when the policy status
+      transitions to 'issued' via PATCH /api/policy/{id}.
+    body:
+      application_id:
+        required: true
+        type: string
+        format: uuid
+        description: "UUID of an existing, unprocessed policy application."
+      policy_number:
+        required: false
+        type: integer
+        nullable: true
+        description: "Optional. Must be greater than 0 and unique across all policies if provided."
+      contractor_first_name:
+        required: false
+        type: string
+        description: "Overrides the value from the application if provided."
+      contractor_second_name:
+        required: false
+        type: string
+        nullable: true
+        description: "Overrides the value from the application if provided."
+      contractor_paternal_last_name:
+        required: false
+        type: string
+        description: "Overrides the value from the application if provided."
+      contractor_maternal_last_name:
+        required: false
+        type: string
+        description: "Overrides the value from the application if provided."
+      insurance_branch:
+        required: false
+        type: string
+        enum: [life, major_medical]
+        description: "Overrides the value from the application if provided."
+      product:
+        required: false
+        type: string
+        enum: [medicalife_familiar_ejecutivo, medicalife_familiar_mas, medicalife_familiar_basico, medicalife_familiar_practico, medicalife_familiar_conversion, primordial, metalife_mujer, metalife_tu_futuro, metalife_educacion, metalife_retiro, perfeclife, tempolife, totalife, horizonte, flexilife_inversion, flexilife_suenos, educalife, tempolife_grandes_sumas, tempolife_preferente, met4u]
+        description: "Overrides the value from the application if provided."
+      payment_frequency:
+        required: false
+        type: string
+        enum: [annual, semiannual, quarterly, bimonthly, monthly]
+        description: "Overrides the value from the application if provided."
+      payment_method:
+        required: false
+        type: string
+        description: |
+          Overrides the value from the application if provided.
+          Valid values depend on the resulting payment_channel (auto-derived from this field):
+          - direct channel: call_center, next_pay, portal, spei, bank_teller, codi
+          - automatic channel: clabe, amex, credit_card, debit_card, portal_msi, next_pay_msi
+      contractor_rfc:
+        required: true
+        type: string
+      contractor_email:
+        required: true
+        type: string
+        description: "Must be a valid email format."
+      contractor_phone:
+        required: true
+        type: string
+      contractor_secondary_phone:
+        required: false
+        type: string
+        description: "Optional second contractor phone. Max 20 characters. Omitted or empty stores NULL."
+      print_policy:
+        required: false
+        type: boolean
+        default: false
+      inc_sum_assured:
+        required: false
+        type: boolean
+        default: false
+      multiple_insured:
+        required: false
+        type: boolean
+        default: false
+      direct_debit:
+        required: false
+        type: boolean
+        default: false
+        description: |
+          Must be false when the effective payment_channel is 'direct'.
+          Accepted freely when channel is 'automatic'.
+          Payment channel is auto-derived from payment_method.
+      pca:
+        required: false
+        type: float
+        description: |
+          Premium per receipt (Cuota de Pago). If omitted or <= 0, it is automatically
+          calculated as: annual_net_premium / receipts_count(payment_frequency).
+      validity_start:
+        required: true
+        type: string
+        format: YYYY-MM-DD
+      validity_end:
+        required: true
+        type: string
+        format: YYYY-MM-DD
+        description: "Must be strictly after validity_start."
+      annual_basic_premium:
+        required: true
+        type: float
+      annual_additional_premium:
+        required: true
+        type: float
+      annual_net_premium:
+        required: true
+        type: float
+        description: "Used to auto-calculate pca if pca is not provided or <= 0."
+      issue_date:
+        required: true
+        type: string
+        format: YYYY-MM-DD
+
+  responses:
+    201:
+      - contentType: application/json
+        reason: "Policy created successfully. Receipts will be generated when status transitions to 'issued'."
+        body:
+          status: "success"
+          policy_id: string (uuid)
+
+    422:
+      - contentType: application/json
+        reason: |
+          Validation failed. Possible field errors:
+          - application_id: required (missing), invalid (bad UUID format or not found), already_processed (application already has a policy)
+          - contractor_first_name: required (if application value is empty and no override is provided)
+          - contractor_paternal_last_name: required (same condition)
+          - contractor_maternal_last_name: required (same condition)
+          - contractor_rfc: required
+          - contractor_email: required, invalid (bad format)
+          - contractor_phone: required
+          - contractor_secondary_phone: too_long (exceeds 20 characters)
+          - insurance_branch: invalid
+          - product: invalid
+          - payment_frequency: invalid
+          - payment_method: invalid (value not in allowed list)
+          - direct_debit: invalid (true when effective payment_channel is 'direct')
+          - validity_start: invalid (bad date format)
+          - validity_end: invalid (bad date format or not after validity_start)
+          - issue_date: invalid (bad date format)
+          - policy_number: already_exists (duplicate)
+        body:
+          errors: object
+
+/api/policies:
+  permissions: [auth, operations, billing]
+  request:
+    method: GET
+    query:
+      cursor:
+        required: false
+        type: string
+        description: |
+          Base64-encoded UUID of the last policy received in the previous page.
+          When omitted, returns the first page.
+          When provided, returns the next 20 policies older than the referenced one.
+
+  responses:
+    200:
+      - contentType: application/json
+        reason: "Returns a paginated list of policies ordered from newest to oldest."
+        body:
+          policies:
+            type: array
+            description: "Up to 20 policies per page."
+            items:
+              id:
+                type: string
+                format: uuid
+                description: "Policy public UUID."
+              application_id:
+                type: string
+                format: uuid
+                description: "Public UUID of the originating application. Use it to connect to the application chat."
+              status:
+                type: string
+                enum: [pending, in_emission, issued, suspended, not_taken]
+              policy_number:
+                type: integer
+                nullable: true
+              advisor_name:
+                type: string
+              product:
+                type: string
+                enum: [medicalife_familiar_ejecutivo, medicalife_familiar_mas, medicalife_familiar_basico, medicalife_familiar_practico, medicalife_familiar_conversion, primordial, metalife_mujer, metalife_tu_futuro, metalife_educacion, metalife_retiro, perfeclife, tempolife, totalife, horizonte, flexilife_inversion, flexilife_suenos, educalife, tempolife_grandes_sumas, tempolife_preferente, met4u]
+              contractor_name:
+                type: string
+          next_cursor:
+            type: string
+            nullable: true
+            description: |
+              Base64-encoded UUID of the last item in the current page.
+              Pass as ?cursor= in the next request to fetch the following page.
+              Null when there are no more pages (current page has fewer than 20 results).
+
+    400:
+      - contentType: application/json
+        reason: "The cursor is not valid base64 or does not decode to a valid UUID."
+        body: { "error": "invalid_cursor" }
+
+/api/policy/{id}:
+  permissions: [auth, operations]
+
+  GET:
+    description: "Retrieves full policy details."
+    responses:
+      200:
+        - contentType: application/json
+          reason: "Returns the full policy."
+          body:
+            policy:
+              id: string (uuid)
+              status:
+                type: string
+                enum: [pending, in_emission, issued, suspended, not_taken]
+              policy_number: integer | null
+              application_folio: string
+              contractor_first_name: string
+              contractor_second_name: string | null
+              contractor_paternal_last_name: string
+              contractor_maternal_last_name: string
+              contractor_rfc: string
+              contractor_email: string
+              contractor_phone: string
+              contractor_secondary_phone: string | null
+              print_policy: boolean
+              advisor_id: string (uuid)
+              advisor_name: string
+              advisor_key: integer | null
+              insurance_branch:
+                type: string
+                enum: [life, major_medical]
+              product:
+                type: string
+                enum: [medicalife_familiar_ejecutivo, medicalife_familiar_mas, medicalife_familiar_basico, medicalife_familiar_practico, medicalife_familiar_conversion, primordial, metalife_mujer, metalife_tu_futuro, metalife_educacion, metalife_retiro, perfeclife, tempolife, totalife, horizonte, flexilife_inversion, flexilife_suenos, educalife, tempolife_grandes_sumas, tempolife_preferente, met4u]
+              inc_sum_assured: boolean
+              multiple_insured: boolean
+              payment_frequency:
+                type: string
+                enum: [annual, semiannual, quarterly, bimonthly, monthly]
+              payment_method: string
+              payment_channel:
+                type: string
+                enum: [automatic, direct]
+                description: "Auto-derived from payment_method."
+              direct_debit: boolean
+              pca: float
+              validity_start: string (YYYY-MM-DD)
+              validity_end: string (YYYY-MM-DD)
+              annual_basic_premium: float
+              annual_additional_premium: float
+              annual_net_premium: float
+              issue_date: string (YYYY-MM-DD)
+              created_at: string (datetime)
+      404:
+        - reason: "Policy not found or has been deleted."
+
+  PATCH:
+    description: |
+      Edits policy fields or soft-deletes the policy.
+      All field updates are optional (PATCH semantics). Only changed values are persisted.
+      A reason is always required for audit logging.
+
+      Lock rule: when the policy status is 'issued' or 'not_taken', only typo-correction
+      fields are editable (contractor_first_name, contractor_second_name,
+      contractor_paternal_last_name, contractor_maternal_last_name, contractor_rfc,
+      contractor_email, contractor_phone, application_folio, policy_number).
+      Any other field sent while locked returns { "errors": { "field": "policy_locked" } } in 422.
+
+      Status transitions allowed:
+        pending     → in_emission | not_taken | suspended
+        in_emission → issued | suspended | not_taken
+        suspended   → in_emission
+        issued      → not_taken
+      Invalid transitions return { "errors": { "status": "invalid_transition" } }.
+      Transitioning to 'issued' generates all first-year receipts.
+
+      To soft-delete, send { "delete": true, "reason": "..." }.
+      Receipts are never deleted.
+
+      Receipt management is handled separately by the Billing role via PATCH /api/receipt/{id}.
+    body:
+      reason:
+        required: true
+        type: string
+        description: "Audit reason (max 255 chars)."
+      delete:
+        required: false
+        type: boolean
+        description: "Set to true to soft-delete the policy."
+      status: { required: false, type: string, enum: [in_emission, issued, suspended, not_taken] }
+      policy_number: { required: false, type: integer }
+      application_folio: { required: false, type: string }
+      contractor_first_name: { required: false, type: string }
+      contractor_second_name: { required: false, type: string }
+      contractor_paternal_last_name: { required: false, type: string }
+      contractor_maternal_last_name: { required: false, type: string }
+      contractor_rfc: { required: false, type: string }
+      contractor_email: { required: false, type: string }
+      contractor_phone: { required: false, type: string }
+      print_policy: { required: false, type: boolean }
+      advisor_id: { required: false, type: string, format: uuid }
+      insurance_branch: { required: false, type: string, enum: [life, major_medical] }
+      product: { required: false, type: string, enum: [medicalife_familiar_ejecutivo, medicalife_familiar_mas, medicalife_familiar_basico, medicalife_familiar_practico, medicalife_familiar_conversion, primordial, metalife_mujer, metalife_tu_futuro, metalife_educacion, metalife_retiro, perfeclife, tempolife, totalife, horizonte, flexilife_inversion, flexilife_suenos, educalife, tempolife_grandes_sumas, tempolife_preferente, met4u] }
+      inc_sum_assured: { required: false, type: boolean }
+      multiple_insured: { required: false, type: boolean }
+      payment_frequency:
+        required: false
+        type: string
+        enum: [annual, semiannual, quarterly, bimonthly, monthly]
+        description: |
+          Cannot be changed if the first receipt already has status 'paid'.
+          Changing this regenerates all first-year receipts.
+      payment_method:
+        required: false
+        type: string
+        description: |
+          Direct channel: call_center, next_pay, portal, spei, bank_teller, codi.
+          Automatic channel: clabe, amex, credit_card, debit_card, portal_msi, next_pay_msi.
+          payment_channel is auto-derived and updated accordingly.
+      direct_debit: { required: false, type: boolean }
+      pca: { required: false, type: float }
+      validity_start: { required: false, type: string, format: YYYY-MM-DD }
+      validity_end: { required: false, type: string, format: YYYY-MM-DD }
+      annual_basic_premium: { required: false, type: float }
+      annual_additional_premium: { required: false, type: float }
+      annual_net_premium: { required: false, type: float }
+      issue_date: { required: false, type: string, format: YYYY-MM-DD }
+    responses:
+      200:
+        - contentType: application/json
+          reason: "Policy updated or soft-deleted successfully."
+          body: { "status": "success" }
+      404:
+        - reason: "Policy not found or already deleted."
+      422:
+        - contentType: application/json
+          reason: |
+            Validation failed or no changes detected.
+            If no fields differ from current values: { "error": "no_changes" }.
+            If a locked field was sent: { "errors": { "field_name": "policy_locked" } }.
+            Otherwise: { "errors": { "field_name": "error_code" } }.
+          body:
+            errors: object
+
+/api/policy/{id}/restore:
+  permissions: [auth, operations]
+  request:
+    method: PATCH
+    description: "Restores a soft-deleted policy."
+    body:
+      reason:
+        required: true
+        type: string
+        description: "Audit reason for restoring."
+  responses:
+    200:
+      - contentType: application/json
+        reason: "Policy restored successfully."
+        body: { "status": "success" }
+    404:
+      - reason: "No deleted policy found with this UUID."
+    422:
+      - contentType: application/json
+        reason: "Missing reason."
+        body:
+          errors: { reason: "required" }
+
+/api/policies/deleted:
+  permissions: [auth, operations]
+  request:
+    method: GET
+    description: "Returns all soft-deleted policies with minimal info and deletion date. No pagination."
+  responses:
+    200:
+      - contentType: application/json
+        reason: "Returns the list of deleted policies."
+        body:
+          policies:
+            type: array
+            items:
+              id: { type: string, format: uuid }
+              policy_number: { type: integer }
+              contractor_name: { type: string }
+              product: { type: string, enum: [medicalife_familiar_ejecutivo, medicalife_familiar_mas, medicalife_familiar_basico, medicalife_familiar_practico, medicalife_familiar_conversion, primordial, metalife_mujer, metalife_tu_futuro, metalife_educacion, metalife_retiro, perfeclife, tempolife, totalife, horizonte, flexilife_inversion, flexilife_suenos, educalife, tempolife_grandes_sumas, tempolife_preferente, met4u] }
+              deleted_at: { type: string, format: datetime }
+
+/api/advisor/applications:
+  permissions: [auth, advisor]
+  note: "Also accessible to SuperAdmin and TeamLeader."
+  request:
+    method: GET
+    description: "Returns all policy applications created by the authenticated user."
+  responses:
+    200:
+      - contentType: application/json
+        reason: "Returns the list of applications created by the advisor."
+        body:
+          applications:
+            type: array
+            items:
+              application_folio: string
+              contractor_full_name: string
+              insurance_branch:
+                type: string
+                enum: [life, major_medical]
+              product:
+                type: string
+                enum: [medicalife_familiar_ejecutivo, medicalife_familiar_mas, medicalife_familiar_basico, medicalife_familiar_practico, medicalife_familiar_conversion, primordial, metalife_mujer, metalife_tu_futuro, metalife_educacion, metalife_retiro, perfeclife, tempolife, totalife, horizonte, flexilife_inversion, flexilife_suenos, educalife, tempolife_grandes_sumas, tempolife_preferente, met4u]
+              payment_frequency:
+                type: string
+                enum: [annual, semiannual, quarterly, bimonthly, monthly]
+              payment_method: string
+              basic_premium: float
+              additional_premium: float | null
+              created_at: string (datetime)
+              policy_created:
+                type: boolean
+                description: "True if Operations has already converted this application into a policy."
+              application_public_id:
+                type: string
+                format: uuid
+                description: |
+                  UUID of the application. Use this as the {id} path parameter to access the
+                  application chat (GET /api/applications/{id}/chat/ws,
+                  GET /api/applications/{id}/chat/messages, etc.). The chat is available from
+                  the moment the application is created. Once a policy is emitted from this
+                  application the chat becomes read-only (GET still works; POST is rejected with 409).
+              policy_public_id:
+                type: string | null
+                format: uuid
+                description: "UUID of the policy created from this application. Null when policy_created is false."
+
+/api/policy/{id}/receipts:
+  permissions: [auth, billing]
+  request:
+    method: GET
+    description: "Returns all receipts for a policy, spanning all years (year-1 and renewals)."
+  responses:
+    200:
+      - contentType: application/json
+        reason: "Returns the list of receipts ordered by renewal (nulls first, i.e. year-1) then creation date."
+        body:
+          receipts:
+            type: array
+            items:
+              id: { type: string, format: uuid }
+              status:
+                type: string
+                enum: [paid, cancelled, not_paid_yet]
+              pca_acreditable: float (decimal) | null
+              client_payment_date: string (YYYY-MM-DD) | null
+              real_payment_date: string (YYYY-MM-DD) | null
+              advisor_credited_date: string (YYYY-MM-DD) | null
+              promotoria_month: string (YYYY-MM-DD) | null
+              comments: string | null
+              renewal_number:
+                type: integer | null
+                description: "null for year-1 receipts; renewal number (2, 3, ...) for renewal receipts."
+              created_at: string (datetime)
+    404:
+      - reason: "Policy not found or has been deleted."
+
+/api/receipt/{id}:
+  permissions: [auth, billing]
+  request:
+    method: PATCH
+    description: "Updates a single receipt's fields. All fields are optional. A reason is always required."
+    body:
+      reason:
+        required: true
+        type: string
+        description: "Audit reason (max 255 chars)."
+      status:
+        required: false
+        type: string
+        enum: [paid, cancelled, not_paid_yet]
+      pca_acreditable: { required: false, type: float }
+      client_payment_date: { required: false, type: string, format: YYYY-MM-DD, description: "Send empty string to clear." }
+      real_payment_date: { required: false, type: string, format: YYYY-MM-DD, description: "Send empty string to clear." }
+      advisor_credited_date: { required: false, type: string, format: YYYY-MM-DD, description: "Send empty string to clear." }
+      promotoria_month: { required: false, type: string, format: YYYY-MM-DD, description: "Send empty string to clear." }
+      comments: { required: false, type: string, description: "Send empty string to clear." }
+  responses:
+    200:
+      - contentType: application/json
+        reason: "Receipt updated successfully."
+        body: { "status": "success" }
+    404:
+      - reason: "Receipt not found."
+    422:
+      - contentType: application/json
+        reason: |
+          Validation failed or no changes detected.
+          If no fields differ: { "error": "no_changes" }.
+          Otherwise: { "errors": { "field_name": "error_code" } }.
+          - reason: required, too_long
+          - status: invalid (not in enum)
+        body:
+          errors: object
+
+/api/policy/{id}/renewal:
+  permissions: [auth, billing]
+  request:
+    method: POST
+    description: |
+      Creates a new renewal for an issued policy. All body fields are optional — if omitted,
+      the value is inherited from the current policy data. Validity dates default to the next
+      annual period (validity_end of current → validity_end + 1 year). PCA is auto-calculated
+      from annual_net_premium / receipts_count if not provided. Receipts are generated automatically
+      within the same transaction.
+    body:
+      advisor_id:
+        required: false
+        type: string
+        format: uuid
+        description: "Overrides the advisor. Must be a valid, non-deleted user UUID."
+      inc_sum_assured: { required: false, type: boolean }
+      multiple_insured: { required: false, type: boolean }
+      payment_frequency:
+        required: false
+        type: string
+        enum: [annual, semiannual, quarterly, bimonthly, monthly]
+      payment_method:
+        required: false
+        type: string
+        description: |
+          Direct channel: call_center, next_pay, portal, spei, bank_teller, codi.
+          Automatic channel: clabe, amex, credit_card, debit_card, portal_msi, next_pay_msi.
+      direct_debit:
+        required: false
+        type: boolean
+        description: "Must be false when the effective payment_channel is 'direct'."
+      pca:
+        required: false
+        type: float
+        description: "If omitted or <= 0, auto-calculated as annual_net_premium / receipts_count(payment_frequency)."
+      validity_start: { required: false, type: string, format: YYYY-MM-DD }
+      validity_end:
+        required: false
+        type: string
+        format: YYYY-MM-DD
+        description: "Must be strictly after validity_start."
+      annual_basic_premium: { required: false, type: float }
+      annual_additional_premium: { required: false, type: float }
+      annual_net_premium: { required: false, type: float }
+      new_policy_number:
+        required: conditional
+        type: integer
+        description: "Required when the policy's insurance_branch is 'major_medical'. Must be > 0."
+  responses:
+    201:
+      - contentType: application/json
+        reason: "Renewal created and receipts generated."
+        body:
+          renewal_id: string (uuid)
+          renewal_number: integer
+    404:
+      - reason: "Policy not found or has been deleted."
+    422:
+      - contentType: application/json
+        reason: |
+          Validation failed. Possible field errors:
+          - policy: not_issued (policy status is not 'issued')
+          - payment_frequency: invalid
+          - payment_method: invalid
+          - direct_debit: invalid (true when payment_channel is 'direct')
+          - validity_start: invalid (bad date format)
+          - validity_end: invalid (bad date format or not after validity_start)
+          - new_policy_number: required (for major_medical policies)
+          - advisor_id: invalid (bad UUID or user not found)
+        body:
+          errors: object
+
+/api/policies/applications/{id}/files:
+  permissions: [auth, super_admin, team_leader, advisor]
+  request:
+    method: POST
+    contentType: multipart/form-data
+    description: |
+      Uploads a single PDF attachment to a policy application (path {id} is the
+      application public UUID). Only the advisor who created the application may
+      upload; anyone else receives 404. Uploads are rejected once Operations has
+      converted the application into a policy.
+
+      The max body size for this route is 25 MiB (overrides the global 5 MiB cap).
+      The MIME type is sniffed from the file's contents — the client-supplied
+      Content-Type header is ignored. Only application/pdf is accepted.
+    body:
+      file:
+        required: true
+        type: file (binary)
+        description: "The PDF to upload. Must sniff as application/pdf and be <= 25 MiB."
+  responses:
+    201:
+      - contentType: application/json
+        reason: "File uploaded to S3 and recorded."
+        body:
+          file_id: string (uuid)
+          original_filename: string
+          mime_type: string
+          size_bytes: integer
+    404:
+      - reason: "Application not found, or the caller is not its creator."
+    409:
+      - contentType: application/json
+        reason: "The application has already been converted into a policy."
+        body: { "errors": { "application_id": "already_processed" } }
+    413:
+      - contentType: text/plain
+        reason: "The uploaded file exceeds 25 MiB."
+    422:
+      - contentType: application/json
+        reason: |
+          Validation failed. Possible field errors:
+          - file: required (no file part), invalid_mime_type (not a PDF)
+        body:
+          errors: object
+
+/api/applications/{id}/chat/messages:
+  # Casbin allows the roles below, but the handler further restricts access to the
+  # application's creator or any user with the Operations role; anyone else gets 404.
+  # The chat is available as soon as the application exists. Once a policy is emitted
+  # from the application the chat becomes read-only (reads are always allowed).
+  permissions: [auth, super_admin, team_leader, advisor, operations]
+  request:
+    method: GET
+    description: |
+      Returns the full chat history for an application (path {id} is the application
+      public UUID) in chronological order, oldest first. The response is NOT paginated.
+      Each message is either kind 'text' (body set) or kind 'pdf' (file metadata set).
+      The 'id' field is present only on 'pdf' messages, where the client needs it to
+      fetch the file via GET /api/applications/{id}/chat/messages/{msg_id}/file.
+  responses:
+    200:
+      - contentType: application/json
+        reason: "Returns the chat history."
+        body:
+          messages:
+            type: array
+            items:
+              id: string (uuid) — present only for 'pdf' messages
+              kind:
+                type: string
+                enum: [text, pdf]
+              body: string | null
+              original_filename: string | null
+              size_bytes: integer | null
+              sender:
+                id: string (uuid)
+                name: string
+              created_at: string (datetime)
+    404:
+      - reason: "Application not found, or the caller is neither its creator nor an Operations user."
+
+/api/applications/{id}/chat/files:
+  # Restricted to the application's creator or any Operations user.
+  # Returns 409 if the application already has an emitted policy (chat is read-only).
+  permissions: [auth, super_admin, team_leader, advisor, operations]
+  request:
+    method: POST
+    contentType: multipart/form-data
+    description: |
+      Uploads a single PDF into the application chat and creates a 'pdf' message
+      (path {id} is the application public UUID). The max body size for this route is
+      25 MiB (overrides the global 5 MiB cap). The MIME type is sniffed from the file's
+      contents; only application/pdf is accepted. The new message is broadcast over the
+      WebSocket to the other participant — the uploader is NOT echoed.
+      Returns 409 if a policy has already been created from this application.
+    body:
+      file:
+        required: true
+        type: file (binary)
+        description: "The PDF to upload. Must sniff as application/pdf and be <= 25 MiB."
+  responses:
+    201:
+      - contentType: application/json
+        reason: "File uploaded and chat message created."
+        body:
+          message:
+            id: string (uuid)
+            kind: "pdf"
+            body: "null"
+            original_filename: string
+            size_bytes: integer
+            sender:
+              id: string (uuid)
+              name: string
+            created_at: string (datetime)
+    404:
+      - reason: "Application not found, or the caller is not authorized."
+    409:
+      - contentType: text/plain
+        reason: "The application already has an emitted policy — the chat is read-only."
+    413:
+      - contentType: text/plain
+        reason: "The uploaded file exceeds 25 MiB."
+    422:
+      - contentType: application/json
+        reason: |
+          Validation failed. Possible field errors:
+          - file: required (no file part), invalid_mime_type (not a PDF)
+        body:
+          errors: object
+
+/api/applications/{id}/chat/messages/{msg_id}/file:
+  # Restricted to the application's creator or any Operations user (others get 404).
+  permissions: [auth, super_admin, team_leader, advisor, operations]
+  request:
+    method: GET
+    description: |
+      Streams the raw PDF bytes for a 'pdf' chat message ({id} = application UUID,
+      {msg_id} = chat message UUID). Proxied through the server (not a presigned S3 URL)
+      so authorization is enforced on every fetch and the bucket name stays internal.
+  responses:
+    200:
+      - contentType: application/pdf
+        reason: |
+          Streams the file. Content-Disposition is 'attachment' with the sanitized
+          original filename; cached privately for 60 seconds.
+    404:
+      - reason: "Application/message not found, message is not a 'pdf', deleted, or caller not authorized."
+
+/api/applications/{id}/chat/ws:
+  # Restricted to the application's creator or any Operations user (others get 404).
+  # When a policy exists for the application the chat is read-only: the WebSocket
+  # connection is accepted so the client can listen, but any frames sent by the
+  # client are silently discarded without persisting or broadcasting.
+  permissions: [auth, super_admin, team_leader, advisor, operations]
+  request:
+    method: GET
+    description: |
+      Upgrades the connection to a WebSocket for real-time application chat
+      (path {id} is the application public UUID). Because browsers cannot set custom
+      headers on a WebSocket handshake, authentication uses the session token in the
+      query string (?t=<token>) instead of the Authorization header.
+
+      Client -> server frames (JSON): { "kind": "text", "body": "<= 4000 chars" }.
+      Non-text frames and empty or oversized bodies are silently ignored. PDFs are NOT
+      sent over the socket — upload them via POST /api/applications/{id}/chat/files.
+      All client frames are silently discarded when the chat is read-only (policy exists).
+
+      Server -> client frames (JSON): a chat message object (same shape as the chat
+      history items). Text messages carry no 'id'; 'pdf' messages carry 'id' so the file
+      can be fetched. The author never receives an echo of their own message.
+
+      Only allowlisted origins are accepted: vigvita.com.mx (and www), plus localhost
+      for development. Any other origin — or a request with no Origin header
+      (non-browser clients) — is rejected at the handshake with 403.
+    query:
+      t:
+        required: true
+        type: string
+        description: "Session token (same value used as a Bearer token)."
+  responses:
+    101:
+      - reason: "Switching Protocols — WebSocket connection established."
+    403:
+      - reason: "Origin not allowed (cross-origin, or a non-browser client with no Origin header)."
+    404:
+      - reason: "Missing/invalid token, application not found, or caller not authorized."
+
+components:
+  schemas:
+    ClientData:
+      type: object
+      description: "Detailed client data payload including Profile, Referrals, Assets, Insurance, etc."
+      properties:
+        profile:
+          type: object
+          properties:
+            phone: { type: string }
+            occupation: { type: string }
+            hobbies: { type: string }
+            sport: { type: string }
+            smoker: { type: boolean }
+            birth_date: { type: string }
+            marital_status: { type: string }
+            spouse_name: { type: string }
+            spouse_phone: { type: string }
+            spouse_birth_date: { type: string }
+            spouse_occupation: { type: string }
+            spouse_smoker: { type: boolean }
+            spouse_hobbies: { type: string }
+            spouse_sport: { type: string }
+            dependents:
+              type: array
+              items:
+                type: object
+                properties:
+                  name: { type: string }
+                  age: { type: integer }
+                  relationship: { type: string }
+                  notes: { type: string }
+            note_protection: { type: string }
+            note_education: { type: string }
+            note_savings: { type: string }
+            note_retirement: { type: string }
+            note_health: { type: string }
+            note_risks: { type: string }
+        children:
+          type: array
+          items:
+            type: object
+            properties:
+              name: { type: string }
+              age: { type: integer }
+              university: { type: string }
+              years_remaining: { type: integer }
+              projected_cost: { type: number }
+              annual_savings: { type: number }
+        retirement:
+          type: object
+          properties:
+            life_expectancy: { type: integer }
+            retirement_age: { type: integer }
+            monthly_amount: { type: number }
+            current_age: { type: integer }
+        assets:
+          type: object
+          properties:
+            savings: { type: number }
+            house: { type: number }
+            other_properties: { type: number }
+            vehicles: { type: number }
+            investments: { type: number }
+            other: { type: number }
+        liabilities:
+          type: object
+          properties:
+            mortgage: { type: number }
+            loans: { type: number }
+            credit_cards: { type: number }
+            credit_limit: { type: number }
+            other: { type: number }
+        insurance:
+          type: object
+          properties:
+            individual:
+              type: object
+              properties:
+                company: { type: string }
+                plan: { type: string }
+                coverage_amount: { type: number }
+                premium: { type: number }
+            group:
+              type: object
+              properties:
+                company: { type: string }
+                plan: { type: string }
+                coverage_amount: { type: number }
+                premium: { type: number }
+            other:
+              type: object
+              properties:
+                company: { type: string }
+                plan: { type: string }
+                coverage_amount: { type: number }
+                premium: { type: number }
+        income:
+          type: object
+          properties:
+            holder: { type: number }
+            spouse: { type: number }
+            holder_benefits: { type: string }
+            spouse_benefits: { type: string }
+        fixed_expenses:
+          type: object
+          properties:
+            utilities: { type: number }
+            housing: { type: number }
+            food: { type: number }
+            schools: { type: number }
+            transportation: { type: number }
+            insurance: { type: number }
+        variable_expenses:
+          type: object
+          properties:
+            credit_payments: { type: number }
+            recreation: { type: number }
+            entertainment: { type: number }
+            household: { type: number }
+            health: { type: number }
+            other: { type: number }
+        death_expenses:
+          type: object
+          properties:
+            funeral_costs: { type: number }
+            disability_costs: { type: number }
+        plan_details:
+          type: object
+          properties:
+            other_income: { type: number }
+            interest_rate: { type: number }
+            protection_plan: { type: number }
+            savings_plan: { type: number }
+        appointment:
+          type: object
+          properties:
+            day: { type: string }
+            month: { type: string }
+            time: { type: string }
+            location: { type: string }
+            needs_decision_maker: { type: boolean }
+            decision_maker_name: { type: string }
+        referrals:
+          type: array
+          items:
+            $ref: '#/components/schemas/Referral'
+        notes:
+          type: string
+        priority_levels:
+          type: array
+          items:
+            type: object
+            properties:
+              id: { type: string }
+              label: { type: string }
+              color: { type: string }
+              icon: { type: string }
+
+    Referral:
+      type: object
+      properties:
+        name: { type: string }
+        age: { type: integer }
+        marital_status: { type: string }
+        occupation: { type: string }
+        phone: { type: string }
+        circle: { type: string }
+        family_group: { type: string }

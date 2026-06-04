@@ -1,0 +1,13 @@
+Novedades - Versión 1.1.1
+
+Generales:
+• Corrección de errores y mejoras generales de rendimiento.
+• Sincronización de Prospectos: El historial de prospectos ahora requiere conexión a internet para ser consultado. La app sigue funcionando de manera offline para tus citas: puedes crear y guardar nuevos prospectos sin internet, y estos se almacenarán de forma segura en tu dispositivo hasta que recuperes la conexión y se sincronicen automáticamente.
+
+Para asesores:
+• Nueva sección de "Impacto a futuro" dentro del módulo de Retiro.
+• Mejoras en el flujo al actualizar el estado de un prospecto.
+• Nuevo "Modo de Capacitación" (training) exclusivo para asesores en formación.
+
+Para líderes:
+• Nueva función que te permite crear ADNs asignándolos directamente a los miembros de tu equipo.

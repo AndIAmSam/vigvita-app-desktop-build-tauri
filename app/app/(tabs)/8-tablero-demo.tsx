@@ -30,7 +30,8 @@ export default function TableroCopiaScreen() {
         nombreCliente, guardarProspecto, listaClientes, cargarProspecto, borrarCliente, nuevoAnalisis, actualizarEstadoProspecto,
         importarRespaldo, forceSync, currentClientId, cita,
         listaNube, isFetchingCloud, fetchSincronizadosNube,
-        isLider, equipoLider, asesorSeleccionadoGlobal, setAsesorSeleccionadoGlobal
+        isLider, equipoLider, asesorSeleccionadoGlobal, setAsesorSeleccionadoGlobal,
+        actualizarAcompanamiento
     } = useFinancialData();
 
     const [searchText, setSearchText] = useState("");
@@ -79,17 +80,17 @@ export default function TableroCopiaScreen() {
         const nameBase = advisor.nombre?.toLowerCase().trim() || "";
 
         const validEmails = [
-            "gustavo.nava@vigvita.com.mx",
-            "carlosnavarros1016@gmail.com",
-            "c.castillo.wb@gmail.com",
-            "asistenteherschel1@gmail.com"
+            "g",
+            "c",
+            "c",
+            "a"
         ];
 
         const validNames = [
-            "gustavo a nava",
-            "carlos daniel navarro silva",
-            "cristian ivan castillo palma",
-            "herschel esquivel"
+            "gu",
+            "c",
+            "c",
+            "h"
         ];
 
         return validEmails.includes(emailBase) || validNames.includes(nameBase);
@@ -529,7 +530,7 @@ export default function TableroCopiaScreen() {
                             )}
 
                             {currentItems.map((cliente, index) => (
-                                <AnimatedClientRow key={cliente.id} cliente={cliente} index={index} onLoad={handleCargar} onDelete={handleBorrar} onAbrirModalEstado={abrirModalEstado} isLider={isLider} />
+                                <AnimatedClientRow key={cliente.id} cliente={cliente} index={index} onLoad={handleCargar} onDelete={handleBorrar} onAbrirModalEstado={abrirModalEstado} isLider={isLider} isTraining={!!advisor?.training} onActualizarAcompanamiento={actualizarAcompanamiento} />
                             ))}
 
                             {totalPages > 1 && (
@@ -781,26 +782,15 @@ export default function TableroCopiaScreen() {
                             <FontAwesome name="bullhorn" size={28} color={COLORS.azul1} />
                         </View>
                         <Text style={{ fontSize: 18, fontWeight: 'bold', color: COLORS.negro, marginBottom: 5 }}>Novedades</Text>
-                        <Text style={{ fontSize: 14, color: COLORS.textoGris, marginBottom: 15 }}>Versión 1.1.1</Text>
+                        <Text style={{ fontSize: 14, color: COLORS.textoGris, marginBottom: 15 }}>Versión 1.2.0</Text>
 
                         <ScrollView style={{ width: '100%', maxHeight: 350, marginBottom: 10, paddingRight: 5, borderBottomWidth: 1, borderBottomColor: '#f3f4f6' }} showsVerticalScrollIndicator={true}>
 
                             <Text style={{ fontSize: 15, fontWeight: 'bold', color: COLORS.azul1, marginTop: 5, marginBottom: 8 }}>Generales:</Text>
-                            <Text style={{ fontSize: 14, color: COLORS.textoGris, lineHeight: 22, textAlign: 'left', marginBottom: 15 }}>
-                                • Corrección de errores y mejoras generales de rendimiento.{'\n'}
-                                • <Text style={{ fontWeight: 'bold' }}>Sincronización de Prospectos:</Text> El historial de prospectos ahora requiere conexión a internet para ser consultado. La app sigue funcionando de manera offline para tus citas: puedes crear y guardar nuevos prospectos sin internet, y estos se almacenarán de forma segura en tu dispositivo hasta que recuperes la conexión y se sincronicen automáticamente.
-                            </Text>
-
-                            <Text style={{ fontSize: 15, fontWeight: 'bold', color: COLORS.azul1, marginBottom: 8 }}>Para asesores:</Text>
-                            <Text style={{ fontSize: 14, color: COLORS.textoGris, lineHeight: 22, textAlign: 'left', marginBottom: 15 }}>
-                                • Nueva sección de "Impacto a futuro" dentro del módulo de Retiro.{'\n'}
-                                • Mejoras en el flujo al actualizar el estado de un prospecto.{'\n'}
-                                • Nuevo "Modo de Capacitación" (training) exclusivo para asesores en formación.
-                            </Text>
-
-                            <Text style={{ fontSize: 15, fontWeight: 'bold', color: COLORS.azul1, marginBottom: 8 }}>Para líderes:</Text>
                             <Text style={{ fontSize: 14, color: COLORS.textoGris, lineHeight: 22, textAlign: 'left', marginBottom: 5 }}>
-                                • Nueva función que te permite crear ADNs asignándolos directamente a los miembros de tu equipo.
+                                • <Text style={{ fontWeight: 'bold' }}>Registro de Acompañamiento:</Text> Ahora es posible registrar si una sesión de ADN se realizó bajo el formato de "Observación" o "Demostración", o ninguno.{'\n'}
+                                • Botón interactivo y badge visual en cada fila del tablero para definir y visualizar el tipo de acompañamiento ágilmente.{'\n'}
+                                • Sincronización automática de estos estados con el servidor para la correcta visualización en tiempo real por parte del equipo.
                             </Text>
 
                         </ScrollView>
@@ -824,9 +814,40 @@ export default function TableroCopiaScreen() {
 }
 
 // --- ROW COMPONENT (ACTUALIZADO 3 ESTADOS) ---
-const AnimatedClientRow = ({ cliente, index, onLoad, onDelete, onAbrirModalEstado, isLider }: any) => {
+const AnimatedClientRow = ({ cliente, index, onLoad, onDelete, onAbrirModalEstado, isLider, isTraining, onActualizarAcompanamiento }: any) => {
     const rowOp = useRef(new Animated.Value(0)).current;
     useEffect(() => { Animated.timing(rowOp, { toValue: 1, duration: 400, delay: index * 50, useNativeDriver: Platform.OS !== 'web' }).start(); }, []);
+
+    // --- ESTADO LOCAL: MODAL DE ACOMPAÑAMIENTO ---
+    const [acompModalVisible, setAcompModalVisible] = useState(false);
+    // null = no marcado, 'observacion' | 'demostracion' = seleccionado
+    const [acompTipo, setAcompTipo] = useState<'observacion' | 'demostracion' | null>(null);
+    const acompSlideAnim = useRef(new Animated.Value(400)).current;
+
+    useEffect(() => {
+        if (cliente.accompanimentStatus === 'observation') setAcompTipo('observacion');
+        else if (cliente.accompanimentStatus === 'demonstration') setAcompTipo('demostracion');
+        else setAcompTipo(null);
+    }, [cliente.accompanimentStatus]);
+
+    const abrirAcompModal = () => {
+        setAcompModalVisible(true);
+        Animated.spring(acompSlideAnim, { toValue: 0, friction: 8, useNativeDriver: true }).start();
+    };
+
+    const cerrarAcompModal = () => {
+        Animated.timing(acompSlideAnim, { toValue: 600, duration: 220, useNativeDriver: true }).start(() => {
+            setAcompModalVisible(false);
+        });
+    };
+
+    const seleccionarAcomp = (tipo: 'observacion' | 'demostracion') => {
+        // Toggle: si ya está seleccionado, deseleccionar
+        setAcompTipo(prev => prev === tipo ? null : tipo);
+    };
+
+    // Solo asesores normales (ni líderes ni en capacitación)
+    const esAsesorNormal = !isLider && !isTraining;
 
     const estadoValue = cliente.estatusAdquisicion || (cliente.estatusCierre ? 'cierre' : 'en_espera'); // Legacy fallback
     const polizas = cliente.tiposCierre || (cliente.tipoCierre ? [cliente.tipoCierre] : []);
@@ -843,66 +864,211 @@ const AnimatedClientRow = ({ cliente, index, onLoad, onDelete, onAbrirModalEstad
 
     const iconBgColor = isCierre ? COLORS.verde : (isDescartado ? '#9ca3af' : COLORS.azul1);
 
+    // Color/estilo del botón de acompañamiento
+    const acompColor = acompTipo === 'observacion' ? '#7c3aed' : acompTipo === 'demostracion' ? '#0891b2' : '#9ca3af';
+    const acompBgColor = acompTipo === 'observacion' ? '#f5f3ff' : acompTipo === 'demostracion' ? '#ecfeff' : '#f3f4f6';
+
     return (
-        <Animated.View style={[rowStylesArray, { opacity: rowOp }]}>
-            <View style={styles.rowLeft}>
-                <View style={[styles.clientIcon, { backgroundColor: iconBgColor }]}>
-                    {isCierre ? <FontAwesome name="star" size={14} color="#fff" /> :
-                        isDescartado ? <FontAwesome name="close" size={14} color="#fff" /> :
-                            <Text style={styles.avatarText}>{cliente.nombre ? cliente.nombre.charAt(0).toUpperCase() : '?'}</Text>}
-                </View>
-                <View style={{ marginLeft: 12, flex: 1 }}>
-                    <Text style={[styles.clientRowName, isDescartado && { color: '#6b7280', textDecorationLine: 'line-through' }]} numberOfLines={1}>{cliente.nombre}</Text>
-                    <View style={{ flexDirection: 'row', alignItems: 'center', flexWrap: 'wrap' }}>
-                        <Text style={styles.clientRowDate}>{cliente.fechaCreacion}</Text>
+        <>
+            <Animated.View style={[rowStylesArray, { opacity: rowOp }]}>
+                <View style={styles.rowLeft}>
+                    <View style={[styles.clientIcon, { backgroundColor: iconBgColor }]}>
+                        {isCierre ? <FontAwesome name="star" size={14} color="#fff" /> :
+                            isDescartado ? <FontAwesome name="close" size={14} color="#fff" /> :
+                                <Text style={styles.avatarText}>{cliente.nombre ? cliente.nombre.charAt(0).toUpperCase() : '?'}</Text>}
+                    </View>
+                    <View style={{ marginLeft: 12, flex: 1 }}>
+                        <Text style={[styles.clientRowName, isDescartado && { color: '#6b7280', textDecorationLine: 'line-through' }]} numberOfLines={1}>{cliente.nombre}</Text>
+                        <View style={{ flexDirection: 'row', alignItems: 'center', flexWrap: 'wrap' }}>
+                            <Text style={styles.clientRowDate}>{cliente.fechaCreacion}</Text>
 
-                        {/* Mostrar Múltiples Badges de Póliza si fue cierre */}
-                        {isCierre && polizas.map((p: string, i: number) => (
-                            <View key={i} style={styles.badgeCierre}>
-                                <Text style={styles.badgeCierreText}>{p}</Text>
-                            </View>
-                        ))}
+                            {/* Mostrar Múltiples Badges de Póliza si fue cierre */}
+                            {isCierre && polizas.map((p: string, i: number) => (
+                                <View key={i} style={styles.badgeCierre}>
+                                    <Text style={styles.badgeCierreText}>{p}</Text>
+                                </View>
+                            ))}
 
-                        {/* VISUAL: Mostrar el asesor asignado si es líder (Desde BD/Contexto) */}
-                        {isLider && cliente.asesorAsignado && (
-                            <View style={{ backgroundColor: '#f3f4f6', paddingHorizontal: 6, paddingVertical: 2, borderRadius: 4, marginLeft: 8, flexDirection: 'row', alignItems: 'center', borderWidth: 1, borderColor: '#e5e7eb' }}>
-                                <FontAwesome name="user" size={10} color={COLORS.textoGris} style={{ marginRight: 4 }} />
-                                <Text style={{ fontSize: 10, color: COLORS.textoGris, fontStyle: 'italic', fontWeight: 'bold' }}>
-                                    hecho para: {cliente.asesorAsignado.nombre}
-                                </Text>
-                            </View>
-                        )}
+                            {/* VISUAL: Badge de acompañamiento (solo si fue marcado) */}
+                            {esAsesorNormal && acompTipo && (
+                                <View style={[
+                                    styles.badgeAcomp,
+                                    { backgroundColor: acompTipo === 'observacion' ? '#f5f3ff' : '#ecfeff', borderColor: acompTipo === 'observacion' ? '#ddd6fe' : '#a5f3fc' }
+                                ]}>
+                                    <FontAwesome
+                                        name={acompTipo === 'observacion' ? 'eye' : 'graduation-cap'}
+                                        size={9}
+                                        color={acompTipo === 'observacion' ? '#7c3aed' : '#0891b2'}
+                                        style={{ marginRight: 4 }}
+                                    />
+                                    <Text style={[styles.badgeAcompText, { color: acompTipo === 'observacion' ? '#7c3aed' : '#0891b2' }]}>
+                                        {acompTipo === 'observacion' ? 'Observación' : 'Demostración'}
+                                    </Text>
+                                </View>
+                            )}
 
-                        {/* VISUAL: Mostrar quién creó el ADN si fue un líder (Para el asesor) */}
-                        {cliente.creadoPor && (
-                            <View style={{ backgroundColor: '#f5f3ff', paddingHorizontal: 6, paddingVertical: 2, borderRadius: 4, marginLeft: 8, flexDirection: 'row', alignItems: 'center', borderWidth: 1, borderColor: '#e0d8f5' }}>
-                                <FontAwesome name="star" size={10} color="#7c3aed" style={{ marginRight: 4 }} />
-                                <Text style={{ fontSize: 10, color: '#7c3aed', fontStyle: 'italic', fontWeight: 'bold' }}>
-                                    hecho por: {cliente.creadoPor}
-                                </Text>
-                            </View>
-                        )}
+                            {/* VISUAL: Mostrar el asesor asignado si es líder (Desde BD/Contexto) */}
+                            {isLider && cliente.asesorAsignado && (
+                                <View style={{ backgroundColor: '#f3f4f6', paddingHorizontal: 6, paddingVertical: 2, borderRadius: 4, marginLeft: 8, flexDirection: 'row', alignItems: 'center', borderWidth: 1, borderColor: '#e5e7eb' }}>
+                                    <FontAwesome name="user" size={10} color={COLORS.textoGris} style={{ marginRight: 4 }} />
+                                    <Text style={{ fontSize: 10, color: COLORS.textoGris, fontStyle: 'italic', fontWeight: 'bold' }}>
+                                        hecho para: {cliente.asesorAsignado.nombre}
+                                    </Text>
+                                </View>
+                            )}
+
+                            {/* VISUAL: Mostrar quién creó el ADN si fue un líder (Para el asesor) */}
+                            {cliente.creadoPor && (
+                                <View style={{ backgroundColor: '#f5f3ff', paddingHorizontal: 6, paddingVertical: 2, borderRadius: 4, marginLeft: 8, flexDirection: 'row', alignItems: 'center', borderWidth: 1, borderColor: '#e0d8f5' }}>
+                                    <FontAwesome name="star" size={10} color="#7c3aed" style={{ marginRight: 4 }} />
+                                    <Text style={{ fontSize: 10, color: '#7c3aed', fontStyle: 'italic', fontWeight: 'bold' }}>
+                                        hecho por: {cliente.creadoPor}
+                                    </Text>
+                                </View>
+                            )}
+                        </View>
                     </View>
                 </View>
-            </View>
 
-            <View style={styles.rowRight}>
-                {/* Indicador de Sincronización */}
-                <View style={[styles.iconBtn, { backgroundColor: cliente.sincronizado ? '#dbeafe' : '#fef3c7' }]}>
-                    <FontAwesome name={cliente.sincronizado ? "cloud" : "clock-o"} size={14} color={cliente.sincronizado ? COLORS.nubeSync : COLORS.nubePending} />
+                <View style={styles.rowRight}>
+                    {/* Indicador de Sincronización */}
+                    <View style={[styles.iconBtn, { backgroundColor: cliente.sincronizado ? '#dbeafe' : '#fef3c7' }]}>
+                        <FontAwesome name={cliente.sincronizado ? "cloud" : "clock-o"} size={14} color={cliente.sincronizado ? COLORS.nubeSync : COLORS.nubePending} />
+                    </View>
+
+                    {/* BOTÓN ACOMPAÑAMIENTO — Solo para asesores normales */}
+                    {esAsesorNormal && (
+                        <TouchableOpacity
+                            onPress={abrirAcompModal}
+                            style={[styles.iconBtn, { backgroundColor: acompBgColor, borderWidth: acompTipo ? 1 : 0, borderColor: acompColor }]}
+                            activeOpacity={0.7}
+                        >
+                            <FontAwesome name="users" size={14} color={acompColor} />
+                        </TouchableOpacity>
+                    )}
+
+                    {/* Botón de Estado en lugar de Switch */}
+                    <TouchableOpacity onPress={() => onAbrirModalEstado(cliente)} style={[styles.estadoPillBtn, { borderColor: iconBgColor }]} activeOpacity={0.7}>
+                        <View style={[styles.estadoPillDot, { backgroundColor: iconBgColor }]} />
+                        <Text style={styles.estadoPillText}>{isCierre ? 'Cerrado' : isDescartado ? 'Descartado' : 'En Espera'}</Text>
+                    </TouchableOpacity>
+
+                    {/* Acciones */}
+                    <TouchableOpacity style={styles.iconBtn} onPress={() => onLoad(cliente)}><FontAwesome name="pencil" size={14} color={COLORS.azul1} /></TouchableOpacity>
+                    <TouchableOpacity style={[styles.iconBtn, { backgroundColor: COLORS.rojoBorrar }]} onPress={() => onDelete(cliente.id)}><FontAwesome name="trash-o" size={14} color={COLORS.rojoTexto} /></TouchableOpacity>
                 </View>
+            </Animated.View>
 
-                {/* Botón de Estado en lugar de Switch */}
-                <TouchableOpacity onPress={() => onAbrirModalEstado(cliente)} style={[styles.estadoPillBtn, { borderColor: iconBgColor }]} activeOpacity={0.7}>
-                    <View style={[styles.estadoPillDot, { backgroundColor: iconBgColor }]} />
-                    <Text style={styles.estadoPillText}>{isCierre ? 'Cerrado' : isDescartado ? 'Descartado' : 'En Espera'}</Text>
-                </TouchableOpacity>
+            {/* MODAL ACOMPAÑAMIENTO */}
+            {esAsesorNormal && (
+                <Modal visible={acompModalVisible} animationType="fade" transparent>
+                    <View style={styles.modalOverlayCierre}>
+                        <TouchableOpacity style={StyleSheet.absoluteFill} activeOpacity={1} onPress={cerrarAcompModal} />
+                        <Animated.View style={[styles.modalContentCierre, { transform: [{ translateY: acompSlideAnim }] }]}>
 
-                {/* Acciones */}
-                <TouchableOpacity style={styles.iconBtn} onPress={() => onLoad(cliente)}><FontAwesome name="pencil" size={14} color={COLORS.azul1} /></TouchableOpacity>
-                <TouchableOpacity style={[styles.iconBtn, { backgroundColor: COLORS.rojoBorrar }]} onPress={() => onDelete(cliente.id)}><FontAwesome name="trash-o" size={14} color={COLORS.rojoTexto} /></TouchableOpacity>
-            </View>
-        </Animated.View>
+                            {/* Header */}
+                            <View style={styles.modalHeaderCierre}>
+                                <View style={{ flex: 1 }}>
+                                    <Text style={styles.modalSubtitleCierre}>Registro de Acompañamiento</Text>
+                                    <Text style={styles.modalTitleCierre} numberOfLines={1}>{cliente.nombre}</Text>
+                                    <Text style={styles.modalClientDate}>¿Este ADN se hizo acompañado?</Text>
+                                </View>
+                                <TouchableOpacity style={styles.closeBtnIcon} onPress={cerrarAcompModal}>
+                                    <FontAwesome name="times" size={16} color={COLORS.textoGris} />
+                                </TouchableOpacity>
+                            </View>
+
+                            {/* Explicación */}
+                            <View style={{ backgroundColor: '#f0f9ff', borderRadius: 12, padding: 14, marginBottom: 20, borderWidth: 1, borderColor: '#bae6fd', flexDirection: 'row', alignItems: 'flex-start' }}>
+                                <FontAwesome name="info-circle" size={16} color='#0284c7' style={{ marginRight: 10, marginTop: 1 }} />
+                                <Text style={{ fontSize: 12, color: '#0369a1', lineHeight: 18, flex: 1 }}>
+                                    Marca el tipo de acompañamiento que tuviste en esta sesión de ADN. Este dato ayuda a tu equipo a dar seguimiento a tu desarrollo como asesor.
+                                </Text>
+                            </View>
+
+                            {/* Opciones */}
+                            <Text style={styles.optionsLabelCierre}>TIPO DE ACOMPAÑAMIENTO</Text>
+
+                            <TouchableOpacity
+                                style={[
+                                    styles.btnAcompOption,
+                                    acompTipo === 'observacion' && styles.btnAcompOptionObservacion
+                                ]}
+                                onPress={() => seleccionarAcomp('observacion')}
+                                activeOpacity={0.75}
+                            >
+                                <View style={[styles.btnAcompIconCircle, { backgroundColor: acompTipo === 'observacion' ? '#7c3aed' : '#ede9fe' }]}>
+                                    <FontAwesome name="eye" size={18} color={acompTipo === 'observacion' ? '#fff' : '#7c3aed'} />
+                                </View>
+                                <View style={{ flex: 1, marginLeft: 14 }}>
+                                    <Text style={[styles.btnAcompTitle, { color: acompTipo === 'observacion' ? '#5b21b6' : COLORS.negro }]}>Observación</Text>
+                                    <Text style={styles.btnAcompDesc}>El líder observó cómo el asesor conduce el ADN</Text>
+                                </View>
+                                <View style={[styles.acompRadio, acompTipo === 'observacion' && styles.acompRadioSelected]}>
+                                    {acompTipo === 'observacion' && <View style={styles.acompRadioInner} />}
+                                </View>
+                            </TouchableOpacity>
+
+                            <TouchableOpacity
+                                style={[
+                                    styles.btnAcompOption,
+                                    acompTipo === 'demostracion' && styles.btnAcompOptionDemostracion
+                                ]}
+                                onPress={() => seleccionarAcomp('demostracion')}
+                                activeOpacity={0.75}
+                            >
+                                <View style={[styles.btnAcompIconCircle, { backgroundColor: acompTipo === 'demostracion' ? '#0891b2' : '#ecfeff' }]}>
+                                    <FontAwesome name="graduation-cap" size={18} color={acompTipo === 'demostracion' ? '#fff' : '#0891b2'} />
+                                </View>
+                                <View style={{ flex: 1, marginLeft: 14 }}>
+                                    <Text style={[styles.btnAcompTitle, { color: acompTipo === 'demostracion' ? '#0e7490' : COLORS.negro }]}>Demostración</Text>
+                                    <Text style={styles.btnAcompDesc}>El líder demostró cómo se conduce el ADN al asesor</Text>
+                                </View>
+                                <View style={[styles.acompRadio, acompTipo === 'demostracion' && styles.acompRadioDemoSelected]}>
+                                    {acompTipo === 'demostracion' && <View style={[styles.acompRadioInner, { backgroundColor: '#0891b2' }]} />}
+                                </View>
+                            </TouchableOpacity>
+
+                            {/* Si no hay selección — opción de quitar */}
+                            {acompTipo && (
+                                <TouchableOpacity
+                                    onPress={() => setAcompTipo(null)}
+                                    style={{ alignItems: 'center', paddingVertical: 12, marginTop: 6 }}
+                                >
+                                    <Text style={{ fontSize: 13, color: '#9ca3af', textDecorationLine: 'underline' }}>Quitar acompañamiento</Text>
+                                </TouchableOpacity>
+                            )}
+
+                            {/* Botón Confirmar */}
+                            <TouchableOpacity
+                                style={[styles.btnAction, {
+                                    backgroundColor: acompTipo === 'observacion' ? '#7c3aed' : acompTipo === 'demostracion' ? '#0891b2' : COLORS.negro,
+                                    marginTop: acompTipo ? 8 : 25
+                                }]}
+                                onPress={() => {
+                                    cerrarAcompModal();
+                                    const statusToSend = acompTipo === 'observacion' ? 'observation' : (acompTipo === 'demostracion' ? 'demonstration' : 'unaccompanied');
+                                    if (onActualizarAcompanamiento) {
+                                        onActualizarAcompanamiento(cliente.id, statusToSend);
+                                    }
+                                }}
+                            >
+                                <FontAwesome
+                                    name={acompTipo ? 'check' : 'times'}
+                                    size={14}
+                                    color="#fff"
+                                    style={{ marginRight: 8 }}
+                                />
+                                <Text style={styles.btnText1}>
+                                    {acompTipo ? 'Confirmar acompañamiento' : 'Sin acompañamiento'}
+                                </Text>
+                            </TouchableOpacity>
+
+                        </Animated.View>
+                    </View>
+                </Modal>
+            )}
+        </>
     );
 }
 
@@ -1082,6 +1248,22 @@ const styles = StyleSheet.create({
 
     badgeCierre: { backgroundColor: COLORS.verde, paddingHorizontal: 6, paddingVertical: 2, borderRadius: 6, marginLeft: 4, marginTop: 2 },
     badgeCierreText: { color: '#fff', fontSize: 9, fontWeight: 'bold', textTransform: 'uppercase' },
+
+    // BADGE ACOMPAÑAMIENTO
+    badgeAcomp: { flexDirection: 'row', alignItems: 'center', paddingHorizontal: 7, paddingVertical: 2, borderRadius: 6, marginLeft: 4, marginTop: 2, borderWidth: 1 },
+    badgeAcompText: { fontSize: 9, fontWeight: 'bold', textTransform: 'uppercase' },
+
+    // MODAL ACOMPAÑAMIENTO
+    btnAcompOption: { flexDirection: 'row', alignItems: 'center', backgroundColor: '#fafafa', paddingVertical: 16, paddingHorizontal: 16, borderRadius: 16, borderWidth: 1.5, borderColor: '#e5e7eb', marginTop: 12 },
+    btnAcompOptionObservacion: { backgroundColor: '#faf5ff', borderColor: '#a78bfa' },
+    btnAcompOptionDemostracion: { backgroundColor: '#ecfeff', borderColor: '#67e8f9' },
+    btnAcompIconCircle: { width: 44, height: 44, borderRadius: 22, justifyContent: 'center', alignItems: 'center' },
+    btnAcompTitle: { fontSize: 15, fontWeight: '800', marginBottom: 3 },
+    btnAcompDesc: { fontSize: 11, color: COLORS.textoGris, lineHeight: 15 },
+    acompRadio: { width: 22, height: 22, borderRadius: 11, borderWidth: 2, borderColor: '#d1d5db', justifyContent: 'center', alignItems: 'center', marginLeft: 10 },
+    acompRadioSelected: { borderColor: '#7c3aed' },
+    acompRadioDemoSelected: { borderColor: '#0891b2' },
+    acompRadioInner: { width: 11, height: 11, borderRadius: 6, backgroundColor: '#7c3aed' },
 
     // BOTÓN FLOTANTE
     fabNotas: { position: 'absolute', top: 50, left: 20, backgroundColor: COLORS.azul1, flexDirection: 'row', alignItems: 'center', paddingVertical: 10, paddingHorizontal: 15, borderRadius: 25, shadowColor: "#000", shadowOffset: { width: 0, height: 4 }, shadowOpacity: 0.2, shadowRadius: 8, elevation: 5, zIndex: 10 },

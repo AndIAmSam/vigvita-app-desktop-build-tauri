@@ -172,6 +172,7 @@ export interface ClienteGuardado {
   estatusAdquisicion?: "en_espera" | "descartado" | "cierre";
   tipoCierre?: string; // Legacy
   tiposCierre?: string[]; // Array de pólizas seleccionadas
+  accompanimentStatus?: "unaccompanied" | "observation" | "demonstration";
   asesorAsignado?: { id: string; nombre: string }; // Para funciones de líder ("hecho para")
   creadoPor?: string; // Nombre del líder que creó este ADN ("hecho por", viene de relationship.created_by)
   sincronizado: boolean;
@@ -298,6 +299,10 @@ interface FinancialData {
     estadoEnums: "en_espera" | "descartado" | "cierre",
     tiposPoliza?: string[],
   ) => void;
+  actualizarAcompanamiento: (
+    id: string,
+    status: "unaccompanied" | "observation" | "demonstration"
+  ) => Promise<void>;
 
   // Respaldo
   importarRespaldo: (
@@ -928,6 +933,7 @@ export const FinancialProvider = ({ children }: { children: ReactNode }) => {
           name: cliente.nombre.substring(0, 100), // Max 100 chars as per API
           is_closed: isClosed,
           acquisition_status: acqStatus,
+          accompaniment_status: cliente.accompanimentStatus || "unaccompanied",
           closing_types: cliente.tiposCierre || (cliente.tipoCierre ? [cliente.tipoCierre] : []),
           data: mapClientData(cliente.data)
         };
@@ -1816,6 +1822,25 @@ export const FinancialProvider = ({ children }: { children: ReactNode }) => {
     await localforage.setItem("clientes_db", JSON.stringify(nuevaLista));
   };
 
+  const actualizarAcompanamiento = async (
+    id: string,
+    status: "unaccompanied" | "observation" | "demonstration"
+  ) => {
+    const nuevaLista = listaClientes.map((c) => {
+      if (c.id === id) {
+        return {
+          ...c,
+          accompanimentStatus: status,
+          sincronizado: advisor?.training ? true : false,
+        };
+      }
+      return c;
+    });
+    setListaClientes(nuevaLista);
+    await localforage.setItem("clientes_db", JSON.stringify(nuevaLista));
+    forceSync(nuevaLista);
+  };
+
   const cargarProspecto = async (cliente: ClienteGuardado) => {
     let d = cliente.data;
 
@@ -2101,6 +2126,7 @@ export const FinancialProvider = ({ children }: { children: ReactNode }) => {
         nuevoAnalisis,
         toggleCierreProspecto,
         actualizarEstadoProspecto, // <--- Nueva función expuesta
+        actualizarAcompanamiento,
         importarRespaldo, // <--- Para respaldos
 
         // Líder de Equipo
