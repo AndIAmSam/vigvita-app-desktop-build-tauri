@@ -280,7 +280,8 @@ interface FinancialData {
   // Funciones CRM
   guardarProspecto: (
     estadoOverride?: "en_espera" | "descartado" | "cierre",
-    polizasOverride?: string[]
+    polizasOverride?: string[],
+    acompOverride?: "unaccompanied" | "observation" | "demonstration"
   ) => Promise<void>;
   cargarProspecto: (cliente: ClienteGuardado) => void;
   listaClientes: ClienteGuardado[];
@@ -1105,6 +1106,7 @@ export const FinancialProvider = ({ children }: { children: ReactNode }) => {
               nombre: p.client_name || "Sin Nombre",
               fechaCreacion: safeDate.toLocaleDateString("es-MX"),
               estatusAdquisicion: localStatus,
+              accompanimentStatus: p.accompaniment_status || "unaccompanied",
               sincronizado: true,
               data: {
                 // API v11: Poblamos los referidos con el resumen directo del servidor.
@@ -1692,7 +1694,8 @@ export const FinancialProvider = ({ children }: { children: ReactNode }) => {
   // --- LÓGICA DE GUARDADO (Marca como NO SINCRONIZADO) ---
   const guardarProspecto = async (
     estadoOverride?: "en_espera" | "descartado" | "cierre",
-    polizasOverride?: string[]
+    polizasOverride?: string[],
+    acompOverride?: "unaccompanied" | "observation" | "demonstration"
   ) => {
     if (!nombreCliente.trim()) {
       showAlert("Falta registrar un nombre.");
@@ -1726,6 +1729,7 @@ export const FinancialProvider = ({ children }: { children: ReactNode }) => {
       fechaCreacion: new Date().toLocaleDateString("es-MX"),
       estatusAdquisicion: estadoOverride || "en_espera",
       tiposCierre: polizasOverride || [],
+      accompanimentStatus: acompOverride || "unaccompanied",
       asesorAsignado: asesorSeleccionadoGlobal || undefined,
       sincronizado: advisor?.training ? true : false, // Los ADNs de práctica nacen 'sincronizados' para que el motor de red los ignore para siempre
       data: dataSnapshot,
@@ -1804,41 +1808,101 @@ export const FinancialProvider = ({ children }: { children: ReactNode }) => {
     estadoEnums: "en_espera" | "descartado" | "cierre",
     tiposPoliza?: string[],
   ) => {
-    const nuevaLista = listaClientes.map((c) => {
-      if (c.id === id) {
-        return {
-          ...c,
+    const foundInLocal = listaClientes.some((c) => c.id === id);
+
+    if (foundInLocal) {
+      // El prospecto existe en local — actualizarlo directamente
+      const nuevaLista = listaClientes.map((c) => {
+        if (c.id === id) {
+          return {
+            ...c,
+            estatusAdquisicion: estadoEnums,
+            tiposCierre: tiposPoliza || [],
+            estatusCierre: estadoEnums === "cierre", // Proxy for legacy
+            tipoCierre:
+              tiposPoliza && tiposPoliza.length > 0 ? tiposPoliza[0] : undefined, // Proxy for legacy
+            sincronizado: advisor?.training ? true : false,
+          };
+        }
+        return c;
+      });
+      setListaClientes(nuevaLista);
+      await localforage.setItem("clientes_db", JSON.stringify(nuevaLista));
+      forceSync(nuevaLista);
+    } else {
+      // El prospecto solo existe en la nube (purgado de local).
+      // Re-materializarlo en listaClientes con el nuevo estado.
+      const cloudMatch = listaNube.find((c) => c.id === id || c.serverId === id);
+      if (cloudMatch) {
+        const rematerialized: ClienteGuardado = {
+          ...cloudMatch,
           estatusAdquisicion: estadoEnums,
           tiposCierre: tiposPoliza || [],
-          estatusCierre: estadoEnums === "cierre", // Proxy for legacy
+          estatusCierre: estadoEnums === "cierre",
           tipoCierre:
-            tiposPoliza && tiposPoliza.length > 0 ? tiposPoliza[0] : undefined, // Proxy for legacy
-          sincronizado: advisor?.training ? true : false,
+            tiposPoliza && tiposPoliza.length > 0 ? tiposPoliza[0] : undefined,
+          sincronizado: false, // Marcar para que se re-suba al servidor
         };
+        const nuevaLista = [...listaClientes, rematerialized];
+        setListaClientes(nuevaLista);
+        await localforage.setItem("clientes_db", JSON.stringify(nuevaLista));
+
+        // También actualizar listaNube para que la UI refleje el cambio inmediatamente
+        setListaNube((prev) =>
+          prev.map((c) =>
+            (c.id === id || c.serverId === id)
+              ? { ...c, estatusAdquisicion: estadoEnums, tiposCierre: tiposPoliza || [] }
+              : c
+          )
+        );
+        forceSync(nuevaLista);
       }
-      return c;
-    });
-    setListaClientes(nuevaLista);
-    await localforage.setItem("clientes_db", JSON.stringify(nuevaLista));
+    }
   };
 
   const actualizarAcompanamiento = async (
     id: string,
     status: "unaccompanied" | "observation" | "demonstration"
   ) => {
-    const nuevaLista = listaClientes.map((c) => {
-      if (c.id === id) {
-        return {
-          ...c,
+    const foundInLocal = listaClientes.some((c) => c.id === id);
+
+    if (foundInLocal) {
+      const nuevaLista = listaClientes.map((c) => {
+        if (c.id === id) {
+          return {
+            ...c,
+            accompanimentStatus: status,
+            sincronizado: advisor?.training ? true : false,
+          };
+        }
+        return c;
+      });
+      setListaClientes(nuevaLista);
+      await localforage.setItem("clientes_db", JSON.stringify(nuevaLista));
+      forceSync(nuevaLista);
+    } else {
+      // Cloud-only: re-materializar en local con el nuevo acompañamiento
+      const cloudMatch = listaNube.find((c) => c.id === id || c.serverId === id);
+      if (cloudMatch) {
+        const rematerialized: ClienteGuardado = {
+          ...cloudMatch,
           accompanimentStatus: status,
-          sincronizado: advisor?.training ? true : false,
+          sincronizado: false,
         };
+        const nuevaLista = [...listaClientes, rematerialized];
+        setListaClientes(nuevaLista);
+        await localforage.setItem("clientes_db", JSON.stringify(nuevaLista));
+
+        setListaNube((prev) =>
+          prev.map((c) =>
+            (c.id === id || c.serverId === id)
+              ? { ...c, accompanimentStatus: status }
+              : c
+          )
+        );
+        forceSync(nuevaLista);
       }
-      return c;
-    });
-    setListaClientes(nuevaLista);
-    await localforage.setItem("clientes_db", JSON.stringify(nuevaLista));
-    forceSync(nuevaLista);
+    }
   };
 
   const cargarProspecto = async (cliente: ClienteGuardado) => {
@@ -1879,7 +1943,11 @@ export const FinancialProvider = ({ children }: { children: ReactNode }) => {
 
           // Actualizar listaNube con los datos descargados para no volver a pedirlos
           setListaNube((prev) =>
-            prev.map((c) => c.serverId === cliente.serverId ? { ...c, data: d } : c)
+            prev.map((c) => c.serverId === cliente.serverId ? { 
+                ...c, 
+                data: d, 
+                accompanimentStatus: fullProfile.accompaniment_status || "unaccompanied" 
+            } : c)
           );
         } else if (res.status === 401 || res.status === 403 || res.status === 404) {
           showAlert(`No se pudo obtener el perfil del servidor (${res.status}).`);

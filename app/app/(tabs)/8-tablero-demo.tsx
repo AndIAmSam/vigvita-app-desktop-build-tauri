@@ -62,6 +62,25 @@ export default function TableroCopiaScreen() {
     // --- ESTADO MODAL NOTAS ---
     const [modalNotasVisible, setModalNotasVisible] = useState(false);
 
+    // --- ESTADOS PARA SECUENCIA DE GUARDADO NUEVO PROSPECTO ---
+    const [acompSaveModalVisible, setAcompSaveModalVisible] = useState(false);
+    const [acompSaveTipo, setAcompSaveTipo] = useState<'observacion' | 'demostracion' | null>(null);
+    const [pendingSaveData, setPendingSaveData] = useState<{ estado: "en_espera" | "descartado" | "cierre", polizas: string[] } | null>(null);
+    const acompSaveSlideAnim = useRef(new Animated.Value(400)).current;
+
+    const abrirAcompSaveModal = () => {
+        setAcompSaveModalVisible(true);
+        Animated.spring(acompSaveSlideAnim, { toValue: 0, friction: 8, useNativeDriver: Platform.OS !== 'web' }).start();
+    };
+
+    const cerrarAcompSaveModal = () => {
+        Animated.timing(acompSaveSlideAnim, { toValue: 600, duration: 250, useNativeDriver: Platform.OS !== 'web' }).start(() => {
+            setAcompSaveModalVisible(false);
+            setAcompSaveTipo(null);
+            setPendingSaveData(null);
+        });
+    };
+
     const fadeAnim = useRef(new Animated.Value(0)).current;
     const slideAnim = useRef(new Animated.Value(50)).current;
     const modalSlideAnim = useRef(new Animated.Value(400)).current;
@@ -308,11 +327,11 @@ export default function TableroCopiaScreen() {
         const estadoActual = hasAppointment ? 'cierre' : (c.estatusAdquisicion || (c.estatusCierre ? 'cierre' : 'en_espera'));
         setModalEstadoSel(estadoActual);
         setModalPolizasSel(c.tiposCierre || (c.tipoCierre ? [c.tipoCierre] : []));
-        Animated.spring(modalSlideAnim, { toValue: 0, friction: 8, useNativeDriver: true }).start();
+        Animated.spring(modalSlideAnim, { toValue: 0, friction: 8, useNativeDriver: Platform.OS !== 'web' }).start();
     };
 
     const cerrarModalEstado = () => {
-        Animated.timing(modalSlideAnim, { toValue: 600, duration: 250, useNativeDriver: true }).start(() => {
+        Animated.timing(modalSlideAnim, { toValue: 600, duration: 250, useNativeDriver: Platform.OS !== 'web' }).start(() => {
             setModalClient(null);
             setModalEstadoSel('en_espera');
             setModalPolizasSel([]);
@@ -336,9 +355,24 @@ export default function TableroCopiaScreen() {
             }
 
             if (modalClient.id === 'NUEVO_DRAFT_PENDING') {
-                // Interrumpe y ejecuta el guardado inicial enviando su estado
-                await guardarProspecto(modalEstadoSel, modalEstadoSel === 'cierre' ? modalPolizasSel : []);
-                cerrarModalEstado();
+                const esAsesorNormal = !isLider && !advisor?.training;
+                if (esAsesorNormal) {
+                    setPendingSaveData({
+                        estado: modalEstadoSel,
+                        polizas: modalEstadoSel === 'cierre' ? modalPolizasSel : []
+                    });
+                    Animated.timing(modalSlideAnim, { toValue: 600, duration: 250, useNativeDriver: Platform.OS !== 'web' }).start(() => {
+                        setModalClient(null);
+                        setModalEstadoSel('en_espera');
+                        setModalPolizasSel([]);
+                        setCitaAgendadaBloqueada(false);
+                        abrirAcompSaveModal();
+                    });
+                } else {
+                    // Interrumpe y ejecuta el guardado inicial enviando su estado
+                    await guardarProspecto(modalEstadoSel, modalEstadoSel === 'cierre' ? modalPolizasSel : []);
+                    cerrarModalEstado();
+                }
             } else if (modalClient.id === currentClientId) {
                 // Es el prospecto activo ya guardado, actualizamos el estado del contexto e inmediatamente guardamos los datos crudos consolidados
                 actualizarEstadoProspecto(modalClient.id, modalEstadoSel, modalEstadoSel === 'cierre' ? modalPolizasSel : []);
@@ -599,6 +633,80 @@ export default function TableroCopiaScreen() {
                 <View style={{ height: 100 }} />
             </ScrollView>
 
+            {/* MODAL SECUENCIA ACOMPAÑAMIENTO AL GUARDAR NUEVO */}
+            <Modal visible={acompSaveModalVisible} animationType="fade" transparent>
+                <View style={styles.modalOverlayCierre}>
+                    <TouchableOpacity style={StyleSheet.absoluteFill} activeOpacity={1} onPress={cerrarAcompSaveModal} />
+                    <Animated.View style={[styles.modalContentCierre, { transform: [{ translateY: acompSaveSlideAnim }] }]}>
+                        <View style={styles.modalHeaderCierre}>
+                            <View style={{ flex: 1 }}>
+                                <Text style={styles.modalSubtitleCierre}>Registro de Acompañamiento (Paso 2 de 2)</Text>
+                                <Text style={styles.modalTitleCierre} numberOfLines={1}>{nombreCliente || "Nuevo Prospecto"}</Text>
+                                <Text style={styles.modalClientDate}>¿Este ADN se hizo acompañado?</Text>
+                            </View>
+                            <TouchableOpacity style={styles.closeBtnIcon} onPress={cerrarAcompSaveModal}>
+                                <FontAwesome name="times" size={16} color={COLORS.textoGris} />
+                            </TouchableOpacity>
+                        </View>
+
+                        <View style={{ backgroundColor: '#f0f9ff', borderRadius: 12, padding: 14, marginBottom: 20, borderWidth: 1, borderColor: '#bae6fd', flexDirection: 'row', alignItems: 'flex-start' }}>
+                            <FontAwesome name="info-circle" size={16} color='#0284c7' style={{ marginRight: 10, marginTop: 1 }} />
+                            <Text style={{ fontSize: 12, color: '#0369a1', lineHeight: 18, flex: 1 }}>
+                                Para terminar de guardar, marca el tipo de acompañamiento que tuviste en esta sesión.
+                            </Text>
+                        </View>
+
+                        <Text style={styles.optionsLabelCierre}>TIPO DE ACOMPAÑAMIENTO</Text>
+
+                        <TouchableOpacity style={[styles.btnAcompOption, acompSaveTipo === 'observacion' && styles.btnAcompOptionObservacion]} onPress={() => setAcompSaveTipo(prev => prev === 'observacion' ? null : 'observacion')} activeOpacity={0.75}>
+                            <View style={[styles.btnAcompIconCircle, { backgroundColor: acompSaveTipo === 'observacion' ? '#7c3aed' : '#ede9fe' }]}>
+                                <FontAwesome name="eye" size={18} color={acompSaveTipo === 'observacion' ? '#fff' : '#7c3aed'} />
+                            </View>
+                            <View style={{ flex: 1, marginLeft: 14 }}>
+                                <Text style={[styles.btnAcompTitle, { color: acompSaveTipo === 'observacion' ? '#5b21b6' : COLORS.negro }]}>Observación</Text>
+                                <Text style={styles.btnAcompDesc}>El líder observó cómo el asesor conduce el ADN</Text>
+                            </View>
+                            <View style={[styles.acompRadio, acompSaveTipo === 'observacion' && styles.acompRadioSelected]}>
+                                {acompSaveTipo === 'observacion' && <View style={styles.acompRadioInner} />}
+                            </View>
+                        </TouchableOpacity>
+
+                        <TouchableOpacity style={[styles.btnAcompOption, acompSaveTipo === 'demostracion' && styles.btnAcompOptionDemostracion]} onPress={() => setAcompSaveTipo(prev => prev === 'demostracion' ? null : 'demostracion')} activeOpacity={0.75}>
+                            <View style={[styles.btnAcompIconCircle, { backgroundColor: acompSaveTipo === 'demostracion' ? '#0891b2' : '#ecfeff' }]}>
+                                <FontAwesome name="graduation-cap" size={18} color={acompSaveTipo === 'demostracion' ? '#fff' : '#0891b2'} />
+                            </View>
+                            <View style={{ flex: 1, marginLeft: 14 }}>
+                                <Text style={[styles.btnAcompTitle, { color: acompSaveTipo === 'demostracion' ? '#0e7490' : COLORS.negro }]}>Demostración</Text>
+                                <Text style={styles.btnAcompDesc}>El líder demostró cómo se conduce el ADN al asesor</Text>
+                            </View>
+                            <View style={[styles.acompRadio, acompSaveTipo === 'demostracion' && styles.acompRadioDemoSelected]}>
+                                {acompSaveTipo === 'demostracion' && <View style={[styles.acompRadioInner, { backgroundColor: '#0891b2' }]} />}
+                            </View>
+                        </TouchableOpacity>
+
+                        {acompSaveTipo && (
+                            <TouchableOpacity onPress={() => setAcompSaveTipo(null)} style={{ alignItems: 'center', paddingVertical: 12, marginTop: 6 }}>
+                                <Text style={{ fontSize: 13, color: '#9ca3af', textDecorationLine: 'underline' }}>Quitar acompañamiento</Text>
+                            </TouchableOpacity>
+                        )}
+
+                        <TouchableOpacity
+                            style={[styles.btnAction, { backgroundColor: acompSaveTipo === 'observacion' ? '#7c3aed' : acompSaveTipo === 'demostracion' ? '#0891b2' : COLORS.negro, marginTop: acompSaveTipo ? 8 : 25 }]}
+                            onPress={async () => {
+                                const statusToSend = acompSaveTipo === 'observacion' ? 'observation' : (acompSaveTipo === 'demostracion' ? 'demonstration' : 'unaccompanied');
+                                if (pendingSaveData) {
+                                    await guardarProspecto(pendingSaveData.estado, pendingSaveData.polizas, statusToSend);
+                                }
+                                cerrarAcompSaveModal();
+                            }}
+                        >
+                            <FontAwesome name={acompSaveTipo ? 'check' : 'times'} size={14} color="#fff" style={{ marginRight: 8 }} />
+                            <Text style={{ fontWeight: 'bold', color: '#fff', fontSize: 14 }}>{acompSaveTipo ? 'Guardar Cambios' : 'Guardar sin acompañamiento'}</Text>
+                        </TouchableOpacity>
+                    </Animated.View>
+                </View>
+            </Modal>
+
             {/* MODAL CAMBIO DE ESTATUS MULTIPLE */}
             <Modal visible={!!modalClient} animationType="fade" transparent>
                 <View style={styles.modalOverlayCierre}>
@@ -832,11 +940,11 @@ const AnimatedClientRow = ({ cliente, index, onLoad, onDelete, onAbrirModalEstad
 
     const abrirAcompModal = () => {
         setAcompModalVisible(true);
-        Animated.spring(acompSlideAnim, { toValue: 0, friction: 8, useNativeDriver: true }).start();
+        Animated.spring(acompSlideAnim, { toValue: 0, friction: 8, useNativeDriver: Platform.OS !== 'web' }).start();
     };
 
     const cerrarAcompModal = () => {
-        Animated.timing(acompSlideAnim, { toValue: 600, duration: 220, useNativeDriver: true }).start(() => {
+        Animated.timing(acompSlideAnim, { toValue: 600, duration: 220, useNativeDriver: Platform.OS !== 'web' }).start(() => {
             setAcompModalVisible(false);
         });
     };
