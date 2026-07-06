@@ -1117,7 +1117,8 @@ export const FinancialProvider = ({ children }: { children: ReactNode }) => {
 
             // "hecho para" — el líder ve para quién lo hizo
             if (relationship.created_for) {
-              mapped.asesorAsignado = { id: '', nombre: relationship.created_for };
+              const matchedAdvisor = equipoLider.find(a => a.nombre === relationship.created_for);
+              mapped.asesorAsignado = { id: matchedAdvisor ? matchedAdvisor.id : '', nombre: relationship.created_for };
             }
             // "hecho por" — el asesor ve quién se lo creó
             if (relationship.created_by) {
@@ -1721,16 +1722,19 @@ export const FinancialProvider = ({ children }: { children: ReactNode }) => {
     };
     let nuevaLista = [...listaClientes];
 
+    // Buscar el prospecto original para preservar el asesor asignado si no se ha seleccionado uno nuevo explícitamente
+    const prospectoOriginal = currentClientId ? (listaClientes.find((c) => c.id === currentClientId) || listaNube.find((c) => c.id === currentClientId)) : null;
+
     // 1. Crear Objeto Cliente
     const nuevoClienteObj: ClienteGuardado = {
       id: currentClientId || Date.now().toString(),
       serverId: currentServerId || undefined,
       nombre: nombreCliente,
-      fechaCreacion: new Date().toLocaleDateString("es-MX"),
+      fechaCreacion: prospectoOriginal ? prospectoOriginal.fechaCreacion : new Date().toLocaleDateString("es-MX"),
       estatusAdquisicion: estadoOverride || "en_espera",
       tiposCierre: polizasOverride || [],
-      accompanimentStatus: acompOverride || "unaccompanied",
-      asesorAsignado: asesorSeleccionadoGlobal || undefined,
+      accompanimentStatus: acompOverride || (prospectoOriginal ? prospectoOriginal.accompanimentStatus : "unaccompanied"),
+      asesorAsignado: asesorSeleccionadoGlobal || prospectoOriginal?.asesorAsignado || undefined,
       sincronizado: advisor?.training ? true : false, // Los ADNs de práctica nacen 'sincronizados' para que el motor de red los ignore para siempre
       data: dataSnapshot,
     };

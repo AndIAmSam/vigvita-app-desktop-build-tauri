@@ -355,7 +355,7 @@ export default function TableroCopiaScreen() {
             }
 
             if (modalClient.id === 'NUEVO_DRAFT_PENDING') {
-                const esAsesorNormal = !isLider && !advisor?.training;
+                const esAsesorNormal = !advisor?.training;
                 if (esAsesorNormal) {
                     setPendingSaveData({
                         estado: modalEstadoSel,
@@ -890,11 +890,19 @@ export default function TableroCopiaScreen() {
                             <FontAwesome name="bullhorn" size={28} color={COLORS.azul1} />
                         </View>
                         <Text style={{ fontSize: 18, fontWeight: 'bold', color: COLORS.negro, marginBottom: 5 }}>Novedades</Text>
-                        <Text style={{ fontSize: 14, color: COLORS.textoGris, marginBottom: 15 }}>Versión 1.2.0</Text>
+                        <Text style={{ fontSize: 14, color: COLORS.textoGris, marginBottom: 15 }}>Versión 1.2.1</Text>
 
                         <ScrollView style={{ width: '100%', maxHeight: 350, marginBottom: 10, paddingRight: 5, borderBottomWidth: 1, borderBottomColor: '#f3f4f6' }} showsVerticalScrollIndicator={true}>
 
-                            <Text style={{ fontSize: 15, fontWeight: 'bold', color: COLORS.azul1, marginTop: 5, marginBottom: 8 }}>Generales:</Text>
+                            <Text style={{ fontSize: 15, fontWeight: 'bold', color: COLORS.azul1, marginTop: 5, marginBottom: 8 }}>Correcciones para Líderes (v1.2.1):</Text>
+                            <Text style={{ fontSize: 14, color: COLORS.textoGris, lineHeight: 22, textAlign: 'left', marginBottom: 15 }}>
+                                • Se corrigió un problema donde editar a un prospecto perteneciente a un asesor del equipo generaba un duplicado en lugar de actualizar el original.{'\n'}
+                                • Los líderes de equipo ahora tienen acceso al flujo completo de "Registro de Acompañamiento" al guardar o editar prospectos desde el tablero.
+                            </Text>
+
+                            <View style={{ height: 1, backgroundColor: '#e5e7eb', width: '80%', alignSelf: 'center', marginVertical: 15 }} />
+
+                            <Text style={{ fontSize: 15, fontWeight: 'bold', color: COLORS.azul1, marginTop: 5, marginBottom: 8 }}>Generales (v1.2.0):</Text>
                             <Text style={{ fontSize: 14, color: COLORS.textoGris, lineHeight: 22, textAlign: 'left', marginBottom: 5 }}>
                                 • <Text style={{ fontWeight: 'bold' }}>Registro de Acompañamiento:</Text> Ahora es posible registrar si una sesión de ADN se realizó bajo el formato de "Observación" o "Demostración", o ninguno.{'\n'}
                                 • Botón interactivo y badge visual en cada fila del tablero para definir y visualizar el tipo de acompañamiento ágilmente.{'\n'}
@@ -954,8 +962,8 @@ const AnimatedClientRow = ({ cliente, index, onLoad, onDelete, onAbrirModalEstad
         setAcompTipo(prev => prev === tipo ? null : tipo);
     };
 
-    // Solo asesores normales (ni líderes ni en capacitación)
-    const esAsesorNormal = !isLider && !isTraining;
+    // Aplica para asesores y líderes, excepto si están en modo capacitación
+    const esAsesorNormal = !isTraining;
 
     const estadoValue = cliente.estatusAdquisicion || (cliente.estatusCierre ? 'cierre' : 'en_espera'); // Legacy fallback
     const polizas = cliente.tiposCierre || (cliente.tipoCierre ? [cliente.tipoCierre] : []);
