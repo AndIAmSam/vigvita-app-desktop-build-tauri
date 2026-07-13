@@ -477,18 +477,28 @@ export default function EntrevistaScreen() {
                   <View style={styles.depRowBottom}>
                     <View style={{ flex: 2, marginRight: 10 }}>
                       <Text style={styles.labelMini}>Parentesco</Text>
-                      <TextInput
-                        style={styles.inputDep}
-                        placeholder="Ej. Hijo"
-                        placeholderTextColor="#9ca3af"
-                        value={dep.parentesco}
-                        onChangeText={(t) => {
-                          const cleanText = t.replace(/[^A-Za-zÁ-ÿ\s]/g, "");
-                          updateDependiente(dep.id, "parentesco", cleanText);
-                        }}
-                        autoCapitalize="words"
-                        maxLength={30}
-                      />
+                      <View style={[styles.inputDep, { paddingVertical: 0, paddingHorizontal: 0, justifyContent: "center", overflow: "hidden" }]}>
+                        <Picker
+                          selectedValue={dep.parentesco}
+                          onValueChange={(itemValue) =>
+                            updateDependiente(dep.id, "parentesco", itemValue)
+                          }
+                          style={styles.picker as any}
+                        >
+                          <Picker.Item label="Selecciona..." value="" color="#9ca3af" />
+                          <Picker.Item label="Hijo(a)" value="Hijo(a)" color={COLORS.negro} />
+                          <Picker.Item label="Padre" value="Padre" color={COLORS.negro} />
+                          <Picker.Item label="Madre" value="Madre" color={COLORS.negro} />
+                          <Picker.Item label="Esposo(a)" value="Esposo(a)" color={COLORS.negro} />
+                          <Picker.Item label="Hermano(a)" value="Hermano(a)" color={COLORS.negro} />
+                          <Picker.Item label="Sobrino(a)" value="Sobrino(a)" color={COLORS.negro} />
+                          <Picker.Item label="Nieto(a)" value="Nieto(a)" color={COLORS.negro} />
+                          <Picker.Item label="Abuelo(a)" value="Abuelo(a)" color={COLORS.negro} />
+                          <Picker.Item label="Tío(a)" value="Tío(a)" color={COLORS.negro} />
+                          <Picker.Item label="Primo(a)" value="Primo(a)" color={COLORS.negro} />
+                          <Picker.Item label="Otro" value="Otro" color={COLORS.negro} />
+                        </Picker>
+                      </View>
                     </View>
                     <View style={{ flex: 1 }}>
                       <Text style={styles.labelMini}>Edad</Text>

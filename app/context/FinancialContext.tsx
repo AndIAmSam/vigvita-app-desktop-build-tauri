@@ -5,9 +5,32 @@ import React, {
   ReactNode,
   useEffect,
 } from "react";
-import { Modal, View, Text, TouchableOpacity, StyleSheet, Alert } from "react-native";
+import { Modal, View, Text, TouchableOpacity, StyleSheet, Alert, Platform } from "react-native";
+import AsyncStorage from "@react-native-async-storage/async-storage";
 import localforage from "localforage";
-import { LISTA_UNIVERSIDADES } from "../constants/UniversityData";
+import { LISTA_UNIVERSIDADES, getCostoUniversidad } from "../constants/UniversityData";
+
+const storage = {
+  getItem: async <T = string>(key: string): Promise<T | null> => {
+    if (Platform.OS === 'web') return localforage.getItem<T>(key);
+    const val = await AsyncStorage.getItem(key);
+    return (val as any) as T;
+  },
+  setItem: async (key: string, value: string): Promise<void> => {
+    if (Platform.OS === 'web') {
+      await localforage.setItem(key, value);
+      return;
+    }
+    await AsyncStorage.setItem(key, value);
+  },
+  removeItem: async (key: string): Promise<void> => {
+    if (Platform.OS === 'web') {
+      await localforage.removeItem(key);
+      return;
+    }
+    await AsyncStorage.removeItem(key);
+  }
+};
 
 // ==========================================
 // 1. DEFINICIÓN DE INTERFACES (ACTUALIZADAS)
@@ -135,6 +158,7 @@ export interface Referido {
   telefono: string;
   entorno?: "Familiar" | "Social" | "Profesional" | "Personal";
   grupoFamiliar?: string;
+  notas?: string;
 }
 
 export interface PerfilData {
@@ -192,6 +216,7 @@ interface FinancialData {
   validateSession: () => Promise<boolean>;
   isAuthenticated: boolean;
   bypassLoginForDev: (role?: 'lider' | 'asesor' | 'training') => Promise<void>;
+  accessExpiresAt: string | null;
 
   // NUEVO: Líder
   isLider: boolean;
@@ -287,7 +312,7 @@ interface FinancialData {
   listaClientes: ClienteGuardado[];
   currentClientId: string | null;
   borrarCliente: (id: string) => Promise<void>;
-  nuevoAnalisis: () => void;
+  nuevoAnalisis: (silencioso?: boolean) => void;
 
   // Función para cambiar estatus de la venta
   toggleCierreProspecto: (
@@ -457,6 +482,7 @@ export const FinancialProvider = ({ children }: { children: ReactNode }) => {
   const [detalle, setDetalle] = useState<DetalleData>(initialDetalle);
   const [cita, setCita] = useState<CitaData>(initialCita);
   const [referidos, setReferidos] = useState<Referido[]>([]);
+  const [accessExpiresAt, setAccessExpiresAt] = useState<string | null>(null);
   const [notas, setNotas] = useState("");
   const [piramideLevels, setPiramideLevels] = useState(INITIAL_PIRAMIDE_LEVELS);
 
@@ -512,7 +538,7 @@ export const FinancialProvider = ({ children }: { children: ReactNode }) => {
     };
 
     // Lo guardamos de manera asíncrona silenciosa
-    localforage.setItem("draft_prospect_v1", JSON.stringify(snapshot)).catch(e => {
+    storage.setItem("draft_prospect_v1", JSON.stringify(snapshot)).catch(e => {
       console.error("Error auto-saving draft:", e);
     });
 
@@ -539,7 +565,7 @@ export const FinancialProvider = ({ children }: { children: ReactNode }) => {
 
   // DETECCIÓN DE CONECTIVIDAD EN TIEMPO REAL
   useEffect(() => {
-    if (typeof window === 'undefined') return; // SSR guard
+    if (typeof window === 'undefined' || typeof window.addEventListener !== 'function') return; // SSR & Native guard
 
     const handleOnline = () => setIsOnline(true);
     const handleOffline = () => setIsOnline(false);
@@ -596,6 +622,103 @@ export const FinancialProvider = ({ children }: { children: ReactNode }) => {
       }
     }
   }, [perfil.fechaNacimiento]);
+
+  // CHILDREN SYNC TRIGGER (0-entrevista -> 2-educacion)
+  useEffect(() => {
+    if (!isInitialized) return;
+
+    const dependientesHijos = perfil.dependientes.filter(d =>
+      d.parentesco.toLowerCase().includes("hijo")
+    );
+
+    setHijos(prevHijos => {
+      let changed = false;
+      let newHijos = [...prevHijos];
+      const currentYear = new Date().getFullYear();
+
+      const hijosMap = new Map();
+      newHijos.forEach((h, idx) => hijosMap.set(h.id, { h, idx }));
+
+      dependientesHijos.forEach(dep => {
+        if (hijosMap.has(dep.id)) {
+          const { h, idx } = hijosMap.get(dep.id);
+          if (h.nombre !== dep.nombre || h.edad !== dep.edad) {
+            const updatedHijo = { ...h, nombre: dep.nombre, edad: dep.edad };
+
+            // Si cambió la edad, recalculamos costos
+            if (h.edad !== dep.edad) {
+              const edadNum = parseInt(dep.edad);
+              if (!isNaN(edadNum) && updatedHijo.universidad) {
+                const faltan = 18 - edadNum;
+                const yearsFaltantes = faltan > 0 ? faltan : 0;
+                const yearEntrada = currentYear + yearsFaltantes;
+                const costo = getCostoUniversidad(updatedHijo.universidad, yearEntrada);
+                let ahorro = 0;
+                if (yearsFaltantes <= 0) {
+                  ahorro = costo;
+                } else {
+                  ahorro = costo / yearsFaltantes;
+                }
+                updatedHijo.yearsFaltantes = yearsFaltantes;
+                updatedHijo.costoProyectado = costo;
+                updatedHijo.ahorroAnual = ahorro;
+              } else {
+                updatedHijo.yearsFaltantes = 0;
+                updatedHijo.costoProyectado = 0;
+                updatedHijo.ahorroAnual = 0;
+              }
+            }
+            newHijos[idx] = updatedHijo;
+            changed = true;
+          }
+        } else {
+          // Nuevo hijo detectado en dependientes
+          const edadNum = parseInt(dep.edad);
+          const defaultUni = LISTA_UNIVERSIDADES[0];
+          let yearsFaltantes = 0;
+          let costoProyectado = 0;
+          let ahorroAnual = 0;
+
+          if (!isNaN(edadNum)) {
+            const faltan = 18 - edadNum;
+            yearsFaltantes = faltan > 0 ? faltan : 0;
+            const yearEntrada = currentYear + yearsFaltantes;
+            costoProyectado = getCostoUniversidad(defaultUni, yearEntrada);
+            if (yearsFaltantes <= 0) {
+              ahorroAnual = costoProyectado;
+            } else {
+              ahorroAnual = costoProyectado / yearsFaltantes;
+            }
+          }
+
+          newHijos.push({
+            id: dep.id, // Usar el mismo ID para vincularlos
+            nombre: dep.nombre,
+            edad: dep.edad,
+            universidad: defaultUni,
+            yearsFaltantes,
+            costoProyectado,
+            ahorroAnual
+          });
+          changed = true;
+        }
+      });
+
+      // Si a un dependiente se le cambió el parentesco (ya no es hijo) pero su ID sigue en perfil.dependientes
+      const allDepIds = new Set(perfil.dependientes.map(d => d.id));
+      const validHijosIds = new Set(dependientesHijos.map(d => d.id));
+
+      const filteredHijos = newHijos.filter(h => {
+        if (allDepIds.has(h.id) && !validHijosIds.has(h.id)) {
+          changed = true;
+          return false;
+        }
+        return true;
+      });
+
+      return changed ? filteredHijos : prevHijos;
+    });
+  }, [perfil.dependientes, isInitialized]);
 
   // --- HELPER: Convierte strings a números. Si es vacío o no válido, devuelve 0 ---
   const parseNum = (val: any): number => {
@@ -723,6 +846,7 @@ export const FinancialProvider = ({ children }: { children: ReactNode }) => {
       phone: r.telefono || "",
       circle: r.entorno || "",
       family_group: r.grupoFamiliar || "",
+      notes: r.notas || "",
     })),
     notes: data.notas || "",
     priority_levels: (data.piramideLevels || []).map((l: any) => ({
@@ -759,6 +883,7 @@ export const FinancialProvider = ({ children }: { children: ReactNode }) => {
       telefono: r.phone || r.telefono || "",
       entorno: r.circle || r.entorno || "Personal",
       grupoFamiliar: r.family_group || r.grupoFamiliar || "",
+      notas: r.notes || r.notas || "",
     }));
 
     const entornoCounters: Record<string, number> = {};
@@ -998,12 +1123,12 @@ export const FinancialProvider = ({ children }: { children: ReactNode }) => {
           const listaActualizada = prev.filter((c) => {
             const syncIndex = clientesPendientes.findIndex(pend => pend.id === c.id);
             // Si el cliente estaba en la lista de pendientes y se mandó (syncIndex !== -1),
-            // lo REMOVEMOS de localforage. Si no estaba (ej. es draft local reciente), se queda.
+            // lo REMOVEMOS de storage. Si no estaba (ej. es draft local reciente), se queda.
             return syncIndex === -1;
           });
 
           // Persistimos dentro del updater de estado para asegurar la fuente de la verdad
-          localforage.setItem("clientes_db", JSON.stringify(listaActualizada)).catch(console.error);
+          storage.setItem("clientes_db", JSON.stringify(listaActualizada)).catch(console.error);
           return listaActualizada;
         });
 
@@ -1085,48 +1210,48 @@ export const FinancialProvider = ({ children }: { children: ReactNode }) => {
         // Los datos completos se obtienen bajo demanda en cargarProspecto
         // cuando el usuario selecciona un prospecto específico.
         const mappedCloud = profilesOk.map((p: any) => {
-            // WebKit safe date parsing
-            let safeDate = new Date();
-            if (p.created_at) {
-              const sanitized = p.created_at.toString().replace(" ", "T");
-              const parsed = new Date(sanitized);
-              if (!isNaN(parsed.getTime())) safeDate = parsed;
-            }
+          // WebKit safe date parsing
+          let safeDate = new Date();
+          if (p.created_at) {
+            const sanitized = p.created_at.toString().replace(" ", "T");
+            const parsed = new Date(sanitized);
+            if (!isNaN(parsed.getTime())) safeDate = parsed;
+          }
 
-            let localStatus: "en_espera" | "descartado" | "cierre" = "en_espera";
-            if (p.status === "completed") localStatus = "cierre";
-            else if (p.status === "cancelled") localStatus = "descartado";
+          let localStatus: "en_espera" | "descartado" | "cierre" = "en_espera";
+          if (p.status === "completed") localStatus = "cierre";
+          else if (p.status === "cancelled") localStatus = "descartado";
 
-            // Mapear relationship del servidor
-            const relationship = p.relationship || {};
+          // Mapear relationship del servidor
+          const relationship = p.relationship || {};
 
-            const mapped: ClienteGuardado = {
-              id: p.id,
-              serverId: p.id,
-              nombre: p.client_name || "Sin Nombre",
-              fechaCreacion: safeDate.toLocaleDateString("es-MX"),
-              estatusAdquisicion: localStatus,
-              accompanimentStatus: p.accompaniment_status || "unaccompanied",
-              sincronizado: true,
-              data: {
-                // API v11: Poblamos los referidos con el resumen directo del servidor.
-                // Soportamos 'referrals' (inglés/v11) o 'referidos' (español/legacy)
-                referidos: unmapReferralsList(p.referrals || p.referidos || [])
-              },
-            };
+          const mapped: ClienteGuardado = {
+            id: p.id,
+            serverId: p.id,
+            nombre: p.client_name || "Sin Nombre",
+            fechaCreacion: safeDate.toLocaleDateString("es-MX"),
+            estatusAdquisicion: localStatus,
+            accompanimentStatus: p.accompaniment_status || "unaccompanied",
+            sincronizado: true,
+            data: {
+              // API v11: Poblamos los referidos con el resumen directo del servidor.
+              // Soportamos 'referrals' (inglés/v11) o 'referidos' (español/legacy)
+              referidos: unmapReferralsList(p.referrals || p.referidos || [])
+            },
+          };
 
-            // "hecho para" — el líder ve para quién lo hizo
-            if (relationship.created_for) {
-              const matchedAdvisor = equipoLider.find(a => a.nombre === relationship.created_for);
-              mapped.asesorAsignado = { id: matchedAdvisor ? matchedAdvisor.id : '', nombre: relationship.created_for };
-            }
-            // "hecho por" — el asesor ve quién se lo creó
-            if (relationship.created_by) {
-              mapped.creadoPor = relationship.created_by;
-            }
+          // "hecho para" — el líder ve para quién lo hizo
+          if (relationship.created_for) {
+            const matchedAdvisor = equipoLider.find(a => a.nombre === relationship.created_for);
+            mapped.asesorAsignado = { id: matchedAdvisor ? matchedAdvisor.id : '', nombre: relationship.created_for };
+          }
+          // "hecho por" — el asesor ve quién se lo creó
+          if (relationship.created_by) {
+            mapped.creadoPor = relationship.created_by;
+          }
 
-            return mapped;
-          });
+          return mapped;
+        });
 
         setListaNube(mappedCloud);
 
@@ -1151,7 +1276,7 @@ export const FinancialProvider = ({ children }: { children: ReactNode }) => {
             });
 
             if (cleaned.length !== prev.length) {
-              localforage.setItem("clientes_db", JSON.stringify(cleaned)).catch(console.error);
+              storage.setItem("clientes_db", JSON.stringify(cleaned)).catch(console.error);
             }
             return cleaned;
           });
@@ -1189,7 +1314,7 @@ export const FinancialProvider = ({ children }: { children: ReactNode }) => {
             ).length;
 
             // Persistir la lista actualizada con los flags de resync
-            localforage.setItem("clientes_db", JSON.stringify(updatedList)).catch(console.error);
+            storage.setItem("clientes_db", JSON.stringify(updatedList)).catch(console.error);
             return updatedList;
           });
 
@@ -1241,7 +1366,7 @@ export const FinancialProvider = ({ children }: { children: ReactNode }) => {
     const init = async () => {
       try {
         // 1. Cargar Sesión
-        const storedSession = await localforage.getItem<string>("advisor_session");
+        const storedSession = await storage.getItem<string>("advisor_session");
 
         let validUser: any = null;
 
@@ -1259,12 +1384,12 @@ export const FinancialProvider = ({ children }: { children: ReactNode }) => {
 
           if (sessionVersion !== APP_SESSION_VERSION) {
             console.warn(`Sesión antigua (v${sessionVersion}) detectada. Se requiere v${APP_SESSION_VERSION}. Forzando purga de credenciales.`);
-            await localforage.removeItem("advisor_session");
+            await storage.removeItem("advisor_session");
             // No seteamos el advisor, así que arrancan deslogueados.
             // NOTA: No tocamos clientes_db para proteger datos de prospectos ingresados offline.
           } else if (Date.now() - loginTime > MAX_OFFLINE_MS) {
             console.warn("Sesión expirada tras 7 días sin validación online. Forzando relogin.");
-            await localforage.removeItem("advisor_session");
+            await storage.removeItem("advisor_session");
             // No seteamos el advisor, arranca deslogueado directo al Index.
           } else {
             // La sesión sigue vigente offline temporalmente
@@ -1281,7 +1406,7 @@ export const FinancialProvider = ({ children }: { children: ReactNode }) => {
         }
         // 2. Cargar DB Local (sin purga — la limpieza segura ocurre en fetchSincronizadosNube
         //    después de que el servidor confirme que tiene los datos)
-        const storedDB = await localforage.getItem<string>("clientes_db");
+        const storedDB = await storage.getItem<string>("clientes_db");
         if (storedDB) setListaClientes(JSON.parse(storedDB));
 
         // 2b. RESPALDO DE EMERGENCIA (pre-migration snapshot)
@@ -1290,14 +1415,14 @@ export const FinancialProvider = ({ children }: { children: ReactNode }) => {
         // la transición a la nube pueda purgar datos. Si el backup ya existe,
         // no se toca. Eliminable en una versión futura cuando el backend sea estable.
         if (storedDB) {
-          const backupExists = await localforage.getItem("emergency_backup_v1");
+          const backupExists = await storage.getItem("emergency_backup_v1");
           if (!backupExists) {
-            await localforage.setItem("emergency_backup_v1", storedDB);
+            await storage.setItem("emergency_backup_v1", storedDB);
             console.log("[BACKUP] Respaldo de emergencia creado con éxito.");
           }
         }
         // 3. Cargar Borrador (Draft Snapshot)
-        const storedDraft = await localforage.getItem<string>("draft_prospect_v1");
+        const storedDraft = await storage.getItem<string>("draft_prospect_v1");
         if (storedDraft) {
           try {
             const draftObj = JSON.parse(storedDraft);
@@ -1309,7 +1434,7 @@ export const FinancialProvider = ({ children }: { children: ReactNode }) => {
 
             if (isEmptyDraft) {
               // Borrar basura residual
-              localforage.removeItem("draft_prospect_v1");
+              storage.removeItem("draft_prospect_v1");
             } else {
               if (draftObj.currentClientId !== undefined) setCurrentClientId(draftObj.currentClientId);
               if (draftObj.currentServerId !== undefined) setCurrentServerId(draftObj.currentServerId);
@@ -1411,7 +1536,7 @@ export const FinancialProvider = ({ children }: { children: ReactNode }) => {
 
         setAdvisor(user);
         setUserName(user.nombre);
-        await localforage.setItem(
+        await storage.setItem(
           "advisor_session",
           JSON.stringify(sessionData),
         );
@@ -1460,12 +1585,27 @@ export const FinancialProvider = ({ children }: { children: ReactNode }) => {
 
     setAdvisor(devUser);
     setUserName(devUser.nombre);
-    await localforage.setItem("advisor_session", JSON.stringify(sessionData));
+    await storage.setItem("advisor_session", JSON.stringify(sessionData));
   };
 
   const logout = async () => {
+    // API v15: Invalidar sesión en el servidor antes de limpiar localmente
+    if (advisor?.token && isOnline && advisor.id !== "DEV-MODE") {
+      try {
+        const API_BASE_URL = process.env.EXPO_PUBLIC_API_URL || "https://vigvita.com.mx";
+        await fetch(`${API_BASE_URL}/api/logout`, {
+          method: "POST",
+          headers: { "Authorization": `Bearer ${advisor.token}` },
+        });
+      } catch (e) {
+        // Si falla (red caída, servidor no disponible), no bloqueamos el logout local
+        console.warn("No se pudo invalidar la sesión en el servidor:", e);
+      }
+    }
+
+    // Limpieza local (como antes)
     setAdvisor(null);
-    await localforage.removeItem("advisor_session");
+    await storage.removeItem("advisor_session");
     // No borramos la DB local, solo la sesión
   };
 
@@ -1513,14 +1653,14 @@ export const FinancialProvider = ({ children }: { children: ReactNode }) => {
 
       // Actualizamos el TimeStamp para renovar sus 7 días de vida offline:
       try {
-        const sessionStr = await localforage.getItem<string>("advisor_session");
+        const sessionStr = await storage.getItem<string>("advisor_session");
         if (sessionStr) {
           const session = JSON.parse(sessionStr);
           // Actualización de compatibilidad a formato envoltorio si no lo tenía:
           const newSession = session.user ? session : { user: session };
           newSession.loginTime = Date.now();
           newSession.sessionVersion = APP_SESSION_VERSION; // Remachamos la versión de seguridad
-          await localforage.setItem("advisor_session", JSON.stringify(newSession));
+          await storage.setItem("advisor_session", JSON.stringify(newSession));
         }
       } catch (err) {
         // Ignoramos silentemente si hay error puramente al escribir
@@ -1586,6 +1726,52 @@ export const FinancialProvider = ({ children }: { children: ReactNode }) => {
     }
   }, [advisor]);
 
+  // Polling para /api/me/access-status (API v14)
+  useEffect(() => {
+    if (!advisor?.token) return;
+    if (advisor.id === "DEV-MODE") return; // Bypass dev mode
+
+    const checkAccess = async () => {
+      if (accessExpiresAt) {
+        if (new Date(accessExpiresAt).getTime() < Date.now()) {
+          console.warn("Acceso revocado (Offline Enforce)");
+          Alert.alert("Sesión Terminada", "Tu periodo de acceso ha concluido.");
+          logout();
+          return;
+        }
+      }
+
+      if (!isOnline) return;
+
+      try {
+        const API_BASE_URL = process.env.EXPO_PUBLIC_API_URL || "https://vigvita.com.mx";
+        const response = await fetch(`${API_BASE_URL}/api/me/access-status`, {
+          method: "GET",
+          headers: { "Authorization": `Bearer ${advisor.token}` },
+        });
+
+        if (response.status === 404) {
+          console.warn("Sesión terminada por el servidor (404 access-status).");
+          Alert.alert("Sesión Terminada", "El servidor ha revocado tu acceso de forma inmediata.");
+          logout();
+          return;
+        }
+
+        if (response.ok) {
+          const data = await response.json();
+          setAccessExpiresAt(data.access_expires_at || null);
+        }
+      } catch (e) {
+        console.warn("Fallo al verificar access-status", e);
+      }
+    };
+
+    checkAccess(); // Primera vez al montar o loguearse
+    const interval = setInterval(checkAccess, 30 * 60 * 1000); // 30 minutos
+
+    return () => clearInterval(interval);
+  }, [advisor?.token, isOnline, accessExpiresAt]);
+
   // --- SETTERS ESTÁNDAR (Igual que antes) ---
   const updatePerfil = (f: keyof PerfilData, v: any) =>
     setPerfil((p) => ({ ...p, [f]: v }));
@@ -1614,11 +1800,13 @@ export const FinancialProvider = ({ children }: { children: ReactNode }) => {
         d.id === id ? { ...d, [field]: value } : d,
       ),
     }));
-  const removeDependiente = (id: string) =>
+  const removeDependiente = (id: string) => {
     setPerfil((prev) => ({
       ...prev,
       dependientes: prev.dependientes.filter((d) => d.id !== id),
     }));
+    setHijos((prev) => prev.filter((h) => h.id !== id));
+  };
   const updateHijoCompleto = (i: number, val: Hijo) =>
     setHijos((prev) => {
       const n = [...prev];
@@ -1773,7 +1961,7 @@ export const FinancialProvider = ({ children }: { children: ReactNode }) => {
     }
 
     setListaClientes(nuevaLista);
-    await localforage.setItem("clientes_db", JSON.stringify(nuevaLista));
+    await storage.setItem("clientes_db", JSON.stringify(nuevaLista));
     setSyncStatus("pending"); // Activa alerta visual
     showAlert("Prospecto guardado exitosamente.");
 
@@ -1804,7 +1992,7 @@ export const FinancialProvider = ({ children }: { children: ReactNode }) => {
       return c;
     });
     setListaClientes(nuevaLista);
-    await localforage.setItem("clientes_db", JSON.stringify(nuevaLista));
+    await storage.setItem("clientes_db", JSON.stringify(nuevaLista));
   };
 
   const actualizarEstadoProspecto = async (
@@ -1831,7 +2019,7 @@ export const FinancialProvider = ({ children }: { children: ReactNode }) => {
         return c;
       });
       setListaClientes(nuevaLista);
-      await localforage.setItem("clientes_db", JSON.stringify(nuevaLista));
+      await storage.setItem("clientes_db", JSON.stringify(nuevaLista));
       forceSync(nuevaLista);
     } else {
       // El prospecto solo existe en la nube (purgado de local).
@@ -1849,7 +2037,7 @@ export const FinancialProvider = ({ children }: { children: ReactNode }) => {
         };
         const nuevaLista = [...listaClientes, rematerialized];
         setListaClientes(nuevaLista);
-        await localforage.setItem("clientes_db", JSON.stringify(nuevaLista));
+        await storage.setItem("clientes_db", JSON.stringify(nuevaLista));
 
         // También actualizar listaNube para que la UI refleje el cambio inmediatamente
         setListaNube((prev) =>
@@ -1882,7 +2070,7 @@ export const FinancialProvider = ({ children }: { children: ReactNode }) => {
         return c;
       });
       setListaClientes(nuevaLista);
-      await localforage.setItem("clientes_db", JSON.stringify(nuevaLista));
+      await storage.setItem("clientes_db", JSON.stringify(nuevaLista));
       forceSync(nuevaLista);
     } else {
       // Cloud-only: re-materializar en local con el nuevo acompañamiento
@@ -1895,7 +2083,7 @@ export const FinancialProvider = ({ children }: { children: ReactNode }) => {
         };
         const nuevaLista = [...listaClientes, rematerialized];
         setListaClientes(nuevaLista);
-        await localforage.setItem("clientes_db", JSON.stringify(nuevaLista));
+        await storage.setItem("clientes_db", JSON.stringify(nuevaLista));
 
         setListaNube((prev) =>
           prev.map((c) =>
@@ -1947,10 +2135,10 @@ export const FinancialProvider = ({ children }: { children: ReactNode }) => {
 
           // Actualizar listaNube con los datos descargados para no volver a pedirlos
           setListaNube((prev) =>
-            prev.map((c) => c.serverId === cliente.serverId ? { 
-                ...c, 
-                data: d, 
-                accompanimentStatus: fullProfile.accompaniment_status || "unaccompanied" 
+            prev.map((c) => c.serverId === cliente.serverId ? {
+              ...c,
+              data: d,
+              accompanimentStatus: fullProfile.accompaniment_status || "unaccompanied"
             } : c)
           );
         } else if (res.status === 401 || res.status === 403 || res.status === 404) {
@@ -2006,7 +2194,7 @@ export const FinancialProvider = ({ children }: { children: ReactNode }) => {
     if (clienteLocal) {
       const nuevaLista = listaClientes.filter((c) => c.id !== id);
       setListaClientes(nuevaLista);
-      await localforage.setItem("clientes_db", JSON.stringify(nuevaLista));
+      await storage.setItem("clientes_db", JSON.stringify(nuevaLista));
       if (currentClientId === id) {
         nuevoAnalisis(true); // No mostrar "listo para nuevo prospecto"
       }
@@ -2047,7 +2235,7 @@ export const FinancialProvider = ({ children }: { children: ReactNode }) => {
 
   const nuevoAnalisis = (silencioso = false) => {
     // Si reseteamos para un nuevo perfil, eliminamos el draft temporal
-    localforage.removeItem("draft_prospect_v1").catch(console.error);
+    storage.removeItem("draft_prospect_v1").catch(console.error);
 
     setCurrentClientId(null);
     setCurrentServerId(null);
@@ -2069,10 +2257,9 @@ export const FinancialProvider = ({ children }: { children: ReactNode }) => {
     setPiramideLevels(INITIAL_PIRAMIDE_LEVELS);
     if (!silencioso) {
       showAlert("Listo para nuevo prospecto.");
+      // Auto-sync solo si no fue un reseteo programático (que probablemente ya lanzó su propio sync)
+      forceSync();
     }
-
-    // Auto-sync
-    forceSync();
   };
 
   // --- RESPALDO (NUEVO) ---
@@ -2118,7 +2305,7 @@ export const FinancialProvider = ({ children }: { children: ReactNode }) => {
       }
 
       setListaClientes(nuevaLista);
-      await localforage.setItem("clientes_db", JSON.stringify(nuevaLista));
+      await storage.setItem("clientes_db", JSON.stringify(nuevaLista));
 
       // Si hay conexión y tenemos cosas pendientes que suban (dependiendo de si se importó con local=false)
       setSyncStatus("pending");
@@ -2147,6 +2334,7 @@ export const FinancialProvider = ({ children }: { children: ReactNode }) => {
         validateSession,
         isAuthenticated: !!advisor,
         bypassLoginForDev,
+        accessExpiresAt,
         userName,
         setUserName: saveVendorName,
         nombreCliente,

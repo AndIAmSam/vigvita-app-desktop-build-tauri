@@ -38,8 +38,8 @@ global_post_specs:
     422:
       - contentType: application/json
         reason: |
-			The JSON is well-formed but cannot be processed. This includes invalid data types (e.g., sending an integer instead of a string)
-			or business validation failures (e.g., invalid email format, missing required fields).
+          The JSON is well-formed but cannot be processed. This includes invalid data types (e.g., sending an integer instead of a string)
+          or business validation failures (e.g., invalid email format, missing required fields).
         body: { "errors": { "field_name": "error_slug" } }
 
 permissions:

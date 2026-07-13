@@ -1,0 +1,568 @@
+# =============================================================================
+# VigADN Desktop App API
+# -----------------------------------------------------------------------------
+# Endpoints consumed by the VigADN desktop application (the advisor's ADN / client
+# profile tool). The web app API lives in api.yaml. `/api/login` is intentionally
+# documented in BOTH files (it is shared): the desktop client calls it with
+# ?api=true to receive the extra `training` and `is_leader` flags.
+# =============================================================================
+
+global_specs:
+    scope: "/*"
+
+    constraints:
+        max_body_size: 5mb
+        max_header_size: 1mb
+        timeout:
+            read: 5s
+            read_headers: 5s
+            write: 5s
+            idle: 60s
+
+        on_request_limit_exceeded:
+            action: "Connection Termination"
+            description: "The server will forcefully close the TCP connection to prevent resource exhaustion."
+
+    # Standard responses for any endpoint
+    default_responses:
+        500:
+            contentType: text/plain
+            body: "Internal server error"
+            reason: "Unexpected server-side failure"
+
+global_post_specs:
+    scope: "POST /*"
+
+    # Standar requirements for any POST endpoint
+    request:
+        contentType: application/json
+
+    # Standard responses for any POST endpoint
+    response:
+        400:
+            - contentType: text/plain
+              body: Bad Request
+              reason: The HTTP request body is malformed or cannot be parsed
+
+        422:
+            - contentType: application/json
+              reason: |
+                  The JSON is well-formed but cannot be processed. This includes invalid data types (e.g., sending an integer instead of a string)
+                  or business validation failures (e.g., invalid email format, missing required fields).
+              body: { "errors": { "field_name": "error_slug" } }
+
+permissions:
+    auth:
+        description: "Verifies user session using Authorization (Bearer <token>) header or (session) cookie. The updater endpoint authenticates via the ?t=<token> query string instead, since it cannot set custom headers."
+        on_failure:
+            status: 404
+            contentType: "text/html"
+
+    super_admin:
+        description: "Restricts access to users with the SuperAdmin role."
+        on_failure:
+            status: 404
+            contentType: "text/html"
+
+    team_leader:
+        description: "Restricts access to users with the TeamLeader role."
+        on_failure:
+            status: 404
+            contentType: "text/html"
+
+    advisor:
+        description: "Restricts access to users with the Advisor role."
+        on_failure:
+            status: 404
+            contentType: "text/html"
+
+roles:
+    description: "Application roles available to the frontend. Returned as the 'role' field on user objects."
+    values:
+        SuperAdmin:
+            description: "Full system access. Manages users, roles, and global configuration."
+        TeamLeader:
+            description: "Manages a team of advisors. Can view and manage their team's client profiles."
+        Advisor:
+            description: "Front-line sales role. Creates and manages client profiles (ADNs) and policy applications."
+        Advisor_Trainee:
+            description: "Trainee version of Advisor. Limited access while in training."
+
+/api/login:
+    request:
+        method: POST
+        query:
+            api:
+                required: false
+                type: boolean
+                description: "The desktop client sets this to 'true' to inject the app-specific metadata ('training' and 'is_leader') into the response."
+        body:
+            email:
+                required: true
+            password:
+                required: true
+
+    responses:
+        200:
+            - contentType: application/json
+              reason: Credentials verified and session created
+              body:
+                  token: string
+                  name:
+                      type: string
+                      description: User's full name.
+                  redirect:
+                      type: string
+                      description: |
+                          The URL to which the server determines the user must be redirected
+                          based on their assigned role (e.g., /coming-soon, /admin/dashboard).
+                          SuperAdmin lands on /admin/dashboard and TeamLeader on /teamleader/home;
+                          the ADN dashboards a TeamLeader can read are automatically scoped to
+                          their own team.
+                  training:
+                      type: boolean
+                      required: false
+                      description: |
+                          This property will ONLY be injected (when ?api=true) and be exclusively true if the authenticated user
+                          holds the Advisor_Trainee role. Indicates learning limitations in place.
+                  is_leader:
+                      type: boolean
+                      required: false
+                      description: |
+                          This property will ONLY be injected (when ?api=true) and be exclusively true if the authenticated user
+                          holds the TeamLeader or SuperAdmin role. Used by the desktop app to toggle leader-specific menus.
+
+        401:
+            - contentType: application/json
+              reason: "The email doesn't exist or the password is incorrect"
+              body: { "error": "invalid_credentials" }
+
+        403:
+            - contentType: application/json
+              reason: "The user's access period (employment_period) has expired"
+              body: { "error": "employment_period_ended" }
+
+        422:
+            - contentType: application/json
+              reason: "Required fields are missing or empty"
+              body: { "error": "missing_required_fields" }
+
+/api/me/access-status:
+    permissions: [auth]
+    request:
+        method: GET
+        description: |
+            Lightweight poll endpoint the desktop client uses to warn the user before their access ends.
+            access_expires_at is a future cutoff set when an admin revokes access. The auth middleware
+            enforces it on every request, so once it passes every authenticated request (including this
+            one) returns 404 — the client should treat that as "access ended" and log out. While access
+            is still valid this returns the (possibly null) cutoff so the client can show a countdown.
+            Available to every authenticated role (including Advisor_Trainee).
+    responses:
+        200:
+            - contentType: application/json
+              reason: "Access is still valid; returns the scheduled cutoff (or null)."
+              body:
+                  access_expires_at:
+                      type: string
+                      format: date-time
+                      nullable: true
+                      description: "RFC3339 cutoff after which access is denied, or null when no revocation is scheduled."
+
+/app/d/u.json:
+    permissions: [auth]
+    request:
+        method: GET
+        description: |
+            VigADN desktop auto-updater manifest, served as JSON. The updater polls this endpoint to
+            discover the latest available release. Authenticated via the session token in the query
+            string (?t=<token>) because the updater cannot set an Authorization header.
+        query:
+            t:
+                required: true
+                type: string
+                description: "Session token (the same value returned by /api/login). Passed in the URL because the updater cannot send custom headers."
+    responses:
+        200:
+            - contentType: application/json
+              reason: "The current update manifest (release version, notes, and per-platform artifacts/signatures). Its exact shape is defined by the desktop updater framework and is passed through opaquely by the server."
+        503:
+            - contentType: application/json
+              reason: "The server has not loaded an update manifest yet."
+              body: { "error": "Update data is not available yet" }
+        404:
+            - contentType: text/html
+              reason: "Missing or invalid session token (?t=)."
+
+/api/profiles/new:
+    permissions: [auth, super_admin, team_leader, advisor]
+    request:
+        method: POST
+        body:
+            clients:
+                type: array
+                description: "A list of client objects to be created. Minimum of 1 client."
+                items:
+                    id:
+                        required: false
+                        description: |
+                            When sent, it must be a valid UUID representing the profile ID to be updated;
+                            if it is not included or does not match an existing profile, a new profile will be created and the provided UUID will be ignored
+                    advisor_id:
+                        required: false
+                        type: string
+                        format: uuid
+                        description: |
+                            When optionally sent, specifies the exact UUID of an existing advisor that this ADN should be attributed to.
+                            A strictly enforced authorization check verifies whether the current logged-in user possesses leadership over the matching target advisor_id.
+                    name:
+                        required: true
+                        type: string
+                        description: "The name of the client. Must be between 1 and 100 characters."
+                        example: "Juan Pérez"
+                    created_at:
+                        required: false
+                        type: string
+                        format: date-time
+                        description: "Timestampt of creation (if not provided, it will be mapped correctly at insertion to server's time)."
+                        example: "2026-03-10T15:00:00Z"
+                    is_closed:
+                        required: false
+                        type: boolean
+                        description: "Whether the profile was closed."
+                        example: false
+                    acquisition_status:
+                        required: true
+                        type: string
+                        description: "Current status of the profile acquisition. Must be one of: 'pending', 'cancelled', 'completed'."
+                        example: "pending"
+                    accompaniment_status:
+                        required: true
+                        type: string
+                        enum: [unaccompanied, demonstration, observation]
+                        description: |
+                            How the advisor handled the profile during creation. Required.
+                            Feeds the global and per-advisor dashboard breakdowns.
+                            Values: 'unaccompanied', 'demonstration', 'observation'.
+                        example: "unaccompanied"
+                    closing_types:
+                        required: false
+                        type: array
+                        items:
+                            type: string
+                        description: "Types of policies or plans closed for this client."
+                    data:
+                        required: false
+                        type: object
+                        description: "Detailed client data payload including Profile, Referrals, Assets, Insurance, etc. Stored encrypted in the database."
+                        $ref: "#/components/schemas/ClientData"
+
+    responses:
+        201:
+            - contentType: application/json
+              reason: "Client profiles created successfully."
+              body:
+                  data:
+                      type: array
+                      description: "Returns an array containing the UUIDs generated for the NEWLY inserted clients."
+                      items:
+                          type: string
+                          format: uuid
+                          example: "123e4567-e89b-12d3-a456-426614174000"
+        403:
+            - contentType: application/json
+              reason: "The authenticated user is not authorized to attribute the ADN to the requested advisor_id."
+              body: { "error": "not_authorized_for_advisor" }
+        404:
+            - contentType: application/json
+              reason: "One or more of the specified advisor_ids could not be found."
+              body: { "error": "some_advisors_not_found" }
+        422:
+            - contentType: application/json
+              reason: "Validation error. Client name is missing, name exceeds 100 characters, classification exceeds 50 characters, acquisition status is not within the valid enum, or accompaniment status is missing or not within the valid enum."
+              body:
+                  errors:
+                      "clients[0].name": "required|too_long"
+                      "clients[0].acquisition_status": "invalid"
+                      "clients[0].accompaniment_status": "required|invalid"
+
+            - contentType: application/json
+              reason: "No clients sent."
+              body:
+                  errors:
+                      "clients": "required"
+
+/api/profiles:
+    permissions: [auth, super_admin, team_leader, advisor]
+
+    request:
+        method: GET
+
+    response:
+        200:
+            - contentType: application/json
+              reason: "Returns a summary list of all ADNs (Client Profiles) where the authenticated user is involved either as the assigned advisor or as the creator."
+              body:
+                  profiles:
+                      - id: "uuid-string"
+                        client_name: "Juan Perez"
+                        status: "pending"
+                        accompaniment_status:
+                            type: string
+                            enum: [unaccompanied, demonstration, observation]
+                            description: "How the advisor handled the profile during creation."
+                            example: "unaccompanied"
+                        created_at: "2026-04-22T00:00:00Z"
+                        needs_resync:
+                            type: boolean
+                            description: "If true, the server's encrypted data for this profile is corrupted or missing. The client should NOT delete local data and must re-send the profile to restore it."
+                            example: false
+                        referrals:
+                            type: array
+                            items:
+                                $ref: "#/components/schemas/Referral"
+                        relationship:
+                            created_by: "Name of the creator (if created by a leader for this advisor)"
+                            created_for: "Name of the advisor (if created by this leader for an advisor)"
+
+/api/profiles/{id}:
+    permissions: [auth, super_admin, team_leader, advisor]
+
+    request:
+        method: GET
+
+    response:
+        200:
+            - contentType: application/json
+              reason: "Returns a single client profile with its full decrypted data payload."
+              body:
+                  id: "uuid-string"
+                  client_name: "Juan Perez"
+                  status: "pending"
+                  accompaniment_status:
+                      type: string
+                      enum: [unaccompanied, demonstration, observation]
+                      description: "How the advisor handled the profile during creation."
+                      example: "unaccompanied"
+                  created_at: "2026-04-22T00:00:00Z"
+                  needs_resync:
+                      type: boolean
+                      description: "If true, the server's encrypted data for this profile is corrupted or missing. The client should NOT delete local data and must re-send the profile to restore it."
+                      example: false
+                  relationship:
+                      created_by: "Name of the creator (if created by a leader for this advisor)"
+                      created_for: "Name of the advisor (if created by this leader for an advisor)"
+                  data:
+                      $ref: "#/components/schemas/ClientData"
+        404:
+            - contentType: text/plain
+              reason: "Profile not found or not accessible by the user."
+
+    delete:
+        method: DELETE
+        permissions: [auth, super_admin, team_leader, advisor]
+
+        response:
+            200:
+                - contentType: application/json
+                  reason: "Profile deleted successfully (soft delete)."
+                  body:
+                      message: "Profile deleted successfully"
+            404:
+                - contentType: text/plain
+                  reason: "Profile not found or not accessible by the user."
+
+/api/team:
+    permissions: [auth, super_admin, team_leader]
+    request:
+        method: GET
+        description: "Returns the id and name of all active users exactly assigned to the current user's direct subordindate team."
+    responses:
+        200:
+            - contentType: application/json
+              reason: "Successful retrieval of team members."
+              body:
+                  data:
+                      type: array
+                      description: "List of team member objects."
+                      items:
+                          type: object
+                          properties:
+                              id:
+                                  type: string
+                                  format: uuid
+                                  description: "Member's public UUID."
+                              name:
+                                  type: string
+                                  description: "Full name of the member."
+
+components:
+    schemas:
+        ClientData:
+            type: object
+            description: "Detailed client data payload including Profile, Referrals, Assets, Insurance, etc."
+            properties:
+                profile:
+                    type: object
+                    properties:
+                        phone: { type: string }
+                        occupation: { type: string }
+                        hobbies: { type: string }
+                        sport: { type: string }
+                        smoker: { type: boolean }
+                        birth_date: { type: string }
+                        marital_status: { type: string }
+                        spouse_name: { type: string }
+                        spouse_phone: { type: string }
+                        spouse_birth_date: { type: string }
+                        spouse_occupation: { type: string }
+                        spouse_smoker: { type: boolean }
+                        spouse_hobbies: { type: string }
+                        spouse_sport: { type: string }
+                        dependents:
+                            type: array
+                            items:
+                                type: object
+                                properties:
+                                    name: { type: string }
+                                    age: { type: integer }
+                                    relationship: { type: string }
+                                    notes: { type: string }
+                        note_protection: { type: string }
+                        note_education: { type: string }
+                        note_savings: { type: string }
+                        note_retirement: { type: string }
+                        note_health: { type: string }
+                        note_risks: { type: string }
+                children:
+                    type: array
+                    items:
+                        type: object
+                        properties:
+                            name: { type: string }
+                            age: { type: integer }
+                            university: { type: string }
+                            years_remaining: { type: integer }
+                            projected_cost: { type: number }
+                            annual_savings: { type: number }
+                retirement:
+                    type: object
+                    properties:
+                        life_expectancy: { type: integer }
+                        retirement_age: { type: integer }
+                        monthly_amount: { type: number }
+                        current_age: { type: integer }
+                assets:
+                    type: object
+                    properties:
+                        savings: { type: number }
+                        house: { type: number }
+                        other_properties: { type: number }
+                        vehicles: { type: number }
+                        investments: { type: number }
+                        other: { type: number }
+                liabilities:
+                    type: object
+                    properties:
+                        mortgage: { type: number }
+                        loans: { type: number }
+                        credit_cards: { type: number }
+                        credit_limit: { type: number }
+                        other: { type: number }
+                insurance:
+                    type: object
+                    properties:
+                        individual:
+                            type: object
+                            properties:
+                                company: { type: string }
+                                plan: { type: string }
+                                coverage_amount: { type: number }
+                                premium: { type: number }
+                        group:
+                            type: object
+                            properties:
+                                company: { type: string }
+                                plan: { type: string }
+                                coverage_amount: { type: number }
+                                premium: { type: number }
+                        other:
+                            type: object
+                            properties:
+                                company: { type: string }
+                                plan: { type: string }
+                                coverage_amount: { type: number }
+                                premium: { type: number }
+                income:
+                    type: object
+                    properties:
+                        holder: { type: number }
+                        spouse: { type: number }
+                        holder_benefits: { type: string }
+                        spouse_benefits: { type: string }
+                fixed_expenses:
+                    type: object
+                    properties:
+                        utilities: { type: number }
+                        housing: { type: number }
+                        food: { type: number }
+                        schools: { type: number }
+                        transportation: { type: number }
+                        insurance: { type: number }
+                variable_expenses:
+                    type: object
+                    properties:
+                        credit_payments: { type: number }
+                        recreation: { type: number }
+                        entertainment: { type: number }
+                        household: { type: number }
+                        health: { type: number }
+                        other: { type: number }
+                death_expenses:
+                    type: object
+                    properties:
+                        funeral_costs: { type: number }
+                        disability_costs: { type: number }
+                plan_details:
+                    type: object
+                    properties:
+                        other_income: { type: number }
+                        interest_rate: { type: number }
+                        protection_plan: { type: number }
+                        savings_plan: { type: number }
+                appointment:
+                    type: object
+                    properties:
+                        day: { type: string }
+                        month: { type: string }
+                        time: { type: string }
+                        location: { type: string }
+                        needs_decision_maker: { type: boolean }
+                        decision_maker_name: { type: string }
+                referrals:
+                    type: array
+                    items:
+                        $ref: "#/components/schemas/Referral"
+                notes:
+                    type: string
+                priority_levels:
+                    type: array
+                    items:
+                        type: object
+                        properties:
+                            id: { type: string }
+                            label: { type: string }
+                            color: { type: string }
+                            icon: { type: string }
+
+        Referral:
+            type: object
+            properties:
+                name: { type: string }
+                age: { type: integer }
+                marital_status: { type: string }
+                occupation: { type: string }
+                phone: { type: string }
+                circle: { type: string }
+                family_group: { type: string }
+                notes: { type: string, maxLength: 255, description: "Free-text note for this referral (max 255 chars)." }

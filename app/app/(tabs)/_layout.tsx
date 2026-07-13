@@ -1,6 +1,6 @@
 import React, { useEffect, useRef, useState } from 'react';
 import { Tabs, usePathname, useRouter, useRootNavigationState } from 'expo-router';
-import { View, StyleSheet, useWindowDimensions, TouchableOpacity, Animated, Text, Image, AppState } from 'react-native';
+import { View, StyleSheet, useWindowDimensions, TouchableOpacity, Animated, Text, Image, AppState, Alert } from 'react-native';
 import { FontAwesome } from '@expo/vector-icons';
 import { useFinancialData } from '../../context/FinancialContext';
 
@@ -46,6 +46,9 @@ const TAB_LABELS: { [key: string]: string } = {
 // --- COMPONENTE DE BARRA PERSONALIZADA ---
 function CustomTabBar({ state, descriptors, navigation }: any) {
   const { width } = useWindowDimensions();
+  const { accessExpiresAt } = useFinancialData();
+
+  const isWarningActive = accessExpiresAt && (new Date(accessExpiresAt).getTime() - Date.now() > 0);
 
   // Filtramos las rutas ocultas
   const visibleRoutes = state.routes.filter((r: any) => !['_sitemap', '+not-found', '9-notas', '8-tablero', '8-tablero-old'].includes(r.name));
@@ -117,6 +120,14 @@ function CustomTabBar({ state, descriptors, navigation }: any) {
         const isFocused = state.index === index;
 
         const onPress = () => {
+          if (isWarningActive && route.name !== '7-referidos' && route.name !== '8-tablero-demo' && route.name !== '8-tablero') {
+            Alert.alert(
+              "Acceso Restringido",
+              "Tu acceso está a punto de expirar. Solo puedes acceder al Tablero y a Referidos (Cierre)."
+            );
+            return;
+          }
+
           const event = navigation.emit({
             type: 'tabPress',
             target: route.key,
@@ -137,8 +148,9 @@ function CustomTabBar({ state, descriptors, navigation }: any) {
         };
 
         // Color dinámico: Blanco si está activo (porque el fondo es verde), Gris si no.
-        const iconColor = isFocused ? COLORS.activeText : COLORS.inactive;
-        const iconName = TAB_ICONS[route.name] || 'circle';
+        const isBlocked = isWarningActive && route.name !== '7-referidos' && route.name !== '8-tablero-demo' && route.name !== '8-tablero';
+        const iconColor = isBlocked ? '#d1d5db' : (isFocused ? COLORS.activeText : COLORS.inactive);
+        const iconName = isBlocked ? 'lock' : (TAB_ICONS[route.name] || 'circle');
         const labelText = TAB_LABELS[route.name] || route.name;
 
         // Tamaño dinámico
@@ -154,8 +166,8 @@ function CustomTabBar({ state, descriptors, navigation }: any) {
             testID={options.tabBarTestID}
             onPress={onPress}
             onLongPress={onLongPress}
-            style={styles.tabItem}
-            activeOpacity={0.8} // Feedback táctil sutil
+            style={[styles.tabItem, { opacity: isBlocked ? 0.5 : 1 }]}
+            activeOpacity={isBlocked ? 0.5 : 0.8} // Feedback táctil sutil
           >
             <View style={{ alignItems: 'center', justifyContent: 'center' }}>
               <FontAwesome name={iconName} size={iconSize} color={iconColor} style={{ marginBottom: 4 }} />
@@ -176,9 +188,24 @@ function CustomTabBar({ state, descriptors, navigation }: any) {
   );
 }
 
+const AccessWarningBanner = ({ expiresAt }: { expiresAt: string | null }) => {
+  if (!expiresAt) return null;
+  const diff = new Date(expiresAt).getTime() - Date.now();
+  if (diff <= 0) return null;
+  const daysLeft = Math.floor(diff / (1000 * 60 * 60 * 24));
+  const hoursLeft = Math.floor((diff / (1000 * 60 * 60)) % 24);
+  const msg = daysLeft > 0 ? `Tu acceso expira en ${daysLeft} días y ${hoursLeft} horas.` : `Tu acceso expira en ${hoursLeft} horas.`;
+  return (
+    <View style={{ backgroundColor: '#ef4444', padding: 8, alignItems: 'center', zIndex: 100 }}>
+      <Text style={{ color: '#fff', fontWeight: 'bold', fontSize: 13 }}>⚠️ {msg}</Text>
+      <Text style={{ color: '#fff', fontSize: 10, marginTop: 2, fontStyle: 'italic' }}>Si crees que es un error, contacta al soporte.</Text>
+    </View>
+  );
+};
+
 // --- EXPORTACIÓN PRINCIPAL ---
 export default function TabLayout() {
-  const { isInitialized, lastSyncTime, syncStatus, isOnline, advisor, validateSession, logout } = useFinancialData();
+  const { isInitialized, lastSyncTime, syncStatus, isOnline, advisor, validateSession, logout, accessExpiresAt } = useFinancialData();
   const pathname = usePathname();
   const router = useRouter();
   const rootNavigationState = useRootNavigationState();
@@ -235,6 +262,7 @@ export default function TabLayout() {
 
   return (
     <View style={{ flex: 1 }}>
+      <AccessWarningBanner expiresAt={accessExpiresAt} />
       <Tabs
         tabBar={props => <CustomTabBar {...props} />}
         screenOptions={{

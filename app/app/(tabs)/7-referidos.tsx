@@ -81,7 +81,7 @@ export default function ReferidosScreen() {
     const existingRef = referidos.find(r => r.id === rowId) || {
       id: rowId,
       entorno: entorno as any,
-      nombre: '', ocupacion: '', edad: '', grupoFamiliar: '', telefono: '', estadoCivil: ''
+      nombre: '', ocupacion: '', edad: '', grupoFamiliar: '', telefono: '', estadoCivil: '', notas: ''
     };
     const updatedRef = { ...existingRef, [field]: value };
     upsertReferido(updatedRef);
@@ -195,11 +195,14 @@ export default function ReferidosScreen() {
                 {/* ENCABEZADOS - Llenan todo el ancho */}
                 <View style={styles.tableHeader}>
                   <Text style={[styles.th, styles.colEntorno]}>ENT.</Text>
-                  <Text style={[styles.th, styles.colNombre]}>NOMBRE</Text>
-                  <Text style={[styles.th, styles.colOcupacion]}>OCUPACIÓN</Text>
-                  <Text style={[styles.th, styles.colEdad]}>EDAD</Text>
-                  <Text style={[styles.th, styles.colGrupo]}>G. FAMILIAR</Text>
-                  <Text style={[styles.th, styles.colTel]}>TELÉFONO</Text>
+                  <View style={{ flex: 1, flexDirection: 'row' }}>
+                    <Text style={[styles.th, styles.colNombre]}>NOMBRE</Text>
+                    <Text style={[styles.th, styles.colOcupacion]}>OCUPACIÓN</Text>
+                    <Text style={[styles.th, styles.colEdad]}>EDAD</Text>
+                    <Text style={[styles.th, styles.colGrupo]}>G. FAMILIAR</Text>
+                    <Text style={[styles.th, styles.colTel]}>TELÉFONO</Text>
+                    <Text style={[styles.th, styles.colNotas]}>NOTAS</Text>
+                  </View>
                 </View>
 
                 {/* CUERPO DE LA TABLA */}
@@ -215,7 +218,7 @@ export default function ReferidosScreen() {
 
                       {/* COLUMNA IZQUIERDA: NOMBRE DEL ENTORNO (MERGED CELL) */}
                       <View style={[styles.leftCol, styles.colEntorno]}>
-                        <View style={{ transform: [{ rotate: '-90deg' }], width: 120, alignItems: 'center' }}>
+                        <View style={{ position: 'absolute', transform: [{ rotate: '-90deg' }], width: 120, alignItems: 'center' }}>
                           <Text style={styles.envLabelVertical}>{env.toUpperCase()}</Text>
                         </View>
                       </View>
@@ -280,6 +283,13 @@ export default function ReferidosScreen() {
                                 placeholder="Teléfono"
                                 keyboardType="phone-pad"
                                 maxLength={10}
+                              />
+                              <TextInput
+                                style={[styles.tdInput, styles.colNotas]}
+                                value={getRowValue(env, idx, 'notas')}
+                                onChangeText={(t) => handleUpdateRow(env, idx, 'notas', t)}
+                                placeholder="Notas"
+                                maxLength={255}
                               />
                             </View>
                           );
@@ -383,7 +393,7 @@ const styles = StyleSheet.create({
 
   // --- ESTILOS TABLA UNIFICADA & RESPONSIVE ---
   tableContainer: {
-    minWidth: 700, // En celular se scrollea, en desktop se estira
+    minWidth: 850, // Aumentado para acomodar columna Notas
     width: '100%', // Intenta llenar la card
     borderRadius: 12,
     overflow: 'hidden',
@@ -403,6 +413,7 @@ const styles = StyleSheet.create({
   colEdad: { width: 60 },
   colGrupo: { flex: 1.2, minWidth: 100 },
   colTel: { flex: 1.2, minWidth: 100 },
+  colNotas: { flex: 2, minWidth: 150 },
 
   emptyTable: { padding: 40, alignItems: 'center', justifyContent: 'center', backgroundColor: '#f9fafb' },
   emptyTableText: { color: COLORS.textoGris, fontSize: 13, fontStyle: 'italic', marginTop: 10 },

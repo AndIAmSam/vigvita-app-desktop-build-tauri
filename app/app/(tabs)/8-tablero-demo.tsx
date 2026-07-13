@@ -59,7 +59,7 @@ export default function TableroCopiaScreen() {
     // --- ESTADO LÍDER DE EQUIPO (Manejado por Contexto) ---
     const [modalAsesoresVisible, setModalAsesoresVisible] = useState(false);
 
-    // --- ESTADO MODAL NOTAS ---
+    // --- ESTADO NOTAS DE VERSIÓN ---
     const [modalNotasVisible, setModalNotasVisible] = useState(false);
 
     // --- ESTADOS PARA SECUENCIA DE GUARDADO NUEVO PROSPECTO ---
@@ -372,12 +372,13 @@ export default function TableroCopiaScreen() {
                     // Interrumpe y ejecuta el guardado inicial enviando su estado
                     await guardarProspecto(modalEstadoSel, modalEstadoSel === 'cierre' ? modalPolizasSel : []);
                     cerrarModalEstado();
+                    nuevoAnalisis(true);
                 }
             } else if (modalClient.id === currentClientId) {
-                // Es el prospecto activo ya guardado, actualizamos el estado del contexto e inmediatamente guardamos los datos crudos consolidados
-                actualizarEstadoProspecto(modalClient.id, modalEstadoSel, modalEstadoSel === 'cierre' ? modalPolizasSel : []);
+                // Es el prospecto activo ya guardado, actualizamos el estado e inmediatamente guardamos los datos crudos consolidados
                 await guardarProspecto(modalEstadoSel, modalEstadoSel === 'cierre' ? modalPolizasSel : []);
                 cerrarModalEstado();
+                nuevoAnalisis(true);
             } else {
                 // Modificando desde la base de abajo un histórico
                 actualizarEstadoProspecto(modalClient.id, modalEstadoSel, modalEstadoSel === 'cierre' ? modalPolizasSel : []);
@@ -698,6 +699,7 @@ export default function TableroCopiaScreen() {
                                     await guardarProspecto(pendingSaveData.estado, pendingSaveData.polizas, statusToSend);
                                 }
                                 cerrarAcompSaveModal();
+                                nuevoAnalisis(true);
                             }}
                         >
                             <FontAwesome name={acompSaveTipo ? 'check' : 'times'} size={14} color="#fff" style={{ marginRight: 8 }} />
@@ -872,43 +874,29 @@ export default function TableroCopiaScreen() {
                 </View>
             </Modal>
 
-            {/* BOTÓN FLOTANTE DE NOTAS */}
-            <TouchableOpacity
-                style={styles.fabNotas}
-                onPress={() => setModalNotasVisible(true)}
-                activeOpacity={0.8}
-            >
-                <FontAwesome name="bullhorn" size={16} color="#fff" style={{ marginRight: 6 }} />
-                <Text style={styles.fabNotasText}>Notas de Versión</Text>
-            </TouchableOpacity>
-
             {/* MODAL NOTAS DE VERSIÓN */}
             <Modal visible={modalNotasVisible} animationType="fade" transparent>
-                <View style={styles.modalOverlay}>
-                    <View style={[styles.modalContent, { padding: 25, alignItems: 'center' }]}>
-                        <View style={{ width: 60, height: 60, borderRadius: 30, backgroundColor: '#e0f2fe', justifyContent: 'center', alignItems: 'center', marginBottom: 20 }}>
-                            <FontAwesome name="bullhorn" size={28} color={COLORS.azul1} />
+                <View style={styles.modalOverlayCierre}>
+                    <TouchableOpacity style={StyleSheet.absoluteFill} activeOpacity={1} onPress={() => setModalNotasVisible(false)} />
+                    <View style={styles.modalContentCierre}>
+                        <View style={styles.modalHeaderCierre}>
+                            <View style={{ flex: 1 }}>
+                                <Text style={styles.modalSubtitleCierre}>Notas de Versión</Text>
+                                <Text style={styles.modalTitleCierre} numberOfLines={1}>Novedades de VigADN</Text>
+                                <Text style={styles.modalClientDate}>Versión 1.3.0</Text>
+                            </View>
+                            <TouchableOpacity style={styles.closeBtnIcon} onPress={() => setModalNotasVisible(false)}>
+                                <FontAwesome name="times" size={16} color={COLORS.textoGris} />
+                            </TouchableOpacity>
                         </View>
-                        <Text style={{ fontSize: 18, fontWeight: 'bold', color: COLORS.negro, marginBottom: 5 }}>Novedades</Text>
-                        <Text style={{ fontSize: 14, color: COLORS.textoGris, marginBottom: 15 }}>Versión 1.2.1</Text>
 
-                        <ScrollView style={{ width: '100%', maxHeight: 350, marginBottom: 10, paddingRight: 5, borderBottomWidth: 1, borderBottomColor: '#f3f4f6' }} showsVerticalScrollIndicator={true}>
-
-                            <Text style={{ fontSize: 15, fontWeight: 'bold', color: COLORS.azul1, marginTop: 5, marginBottom: 8 }}>Correcciones para Líderes (v1.2.1):</Text>
+                        <ScrollView style={{ width: '100%', maxHeight: 350, marginBottom: 10, paddingRight: 5 }} showsVerticalScrollIndicator={true}>
+                            <Text style={{ fontSize: 15, fontWeight: 'bold', color: COLORS.azul1, marginTop: 5, marginBottom: 8 }}>Generales (v1.3.0):</Text>
                             <Text style={{ fontSize: 14, color: COLORS.textoGris, lineHeight: 22, textAlign: 'left', marginBottom: 15 }}>
-                                • Se corrigió un problema donde editar a un prospecto perteneciente a un asesor del equipo generaba un duplicado en lugar de actualizar el original.{'\n'}
-                                • Los líderes de equipo ahora tienen acceso al flujo completo de "Registro de Acompañamiento" al guardar o editar prospectos desde el tablero.
+                                • <Text style={{ fontWeight: 'bold' }}>Notas en Referidos:</Text> Ahora puedes añadir y guardar comentarios o notas personalizadas para cada referido.{'\n'}
+                                • <Text style={{ fontWeight: 'bold' }}>Avisos de Acceso:</Text> Se implementó un nuevo sistema de alertas visuales que te notificará con anticipación si tu acceso a la plataforma está por expirar o ya expiró.{'\n'}
+                                • <Text style={{ fontWeight: 'bold' }}>Limpieza Automática:</Text> Al guardar un nuevo prospecto en tu tablero, el ADN se limpiará automáticamente para que puedas comenzar a capturar el siguiente de forma más fluida.
                             </Text>
-
-                            <View style={{ height: 1, backgroundColor: '#e5e7eb', width: '80%', alignSelf: 'center', marginVertical: 15 }} />
-
-                            <Text style={{ fontSize: 15, fontWeight: 'bold', color: COLORS.azul1, marginTop: 5, marginBottom: 8 }}>Generales (v1.2.0):</Text>
-                            <Text style={{ fontSize: 14, color: COLORS.textoGris, lineHeight: 22, textAlign: 'left', marginBottom: 5 }}>
-                                • <Text style={{ fontWeight: 'bold' }}>Registro de Acompañamiento:</Text> Ahora es posible registrar si una sesión de ADN se realizó bajo el formato de "Observación" o "Demostración", o ninguno.{'\n'}
-                                • Botón interactivo y badge visual en cada fila del tablero para definir y visualizar el tipo de acompañamiento ágilmente.{'\n'}
-                                • Sincronización automática de estos estados con el servidor para la correcta visualización en tiempo real por parte del equipo.
-                            </Text>
-
                         </ScrollView>
 
                         <TouchableOpacity onPress={() => Linking.openURL('https://vigvita.com.mx/vigadn/release-notes')} style={{ marginBottom: 20, paddingVertical: 5 }}>
@@ -920,11 +908,21 @@ export default function TableroCopiaScreen() {
                         <TouchableOpacity
                             style={{ width: '100%', paddingVertical: 14, borderRadius: 12, backgroundColor: COLORS.azul1, alignItems: 'center' }}
                             onPress={() => setModalNotasVisible(false)}>
-                            <Text style={{ fontWeight: 'bold', color: COLORS.blanco, fontSize: 15 }}>Cerrar</Text>
+                            <Text style={{ fontWeight: 'bold', color: '#fff', fontSize: 15 }}>Cerrar</Text>
                         </TouchableOpacity>
                     </View>
                 </View>
             </Modal>
+
+            {/* BOTÓN FLOTANTE DE NOTAS DE VERSIÓN */}
+            <TouchableOpacity
+                style={styles.fabNotas}
+                onPress={() => setModalNotasVisible(true)}
+                activeOpacity={0.8}
+            >
+                <FontAwesome name="info-circle" size={16} color="#fff" style={{ marginRight: 6 }} />
+                <Text style={styles.fabNotasText}>Notas de versión</Text>
+            </TouchableOpacity>
         </View>
     );
 }
@@ -1239,6 +1237,11 @@ const AnimatedReferidoRow = ({ referido, index }: any) => {
                         <Text style={[styles.clientRowDate, { marginTop: 3, fontStyle: 'italic', color: '#9ca3af' }]}>
                             Referido por: {referido.prospectoPadre} el {referido.fechaOrigen}
                         </Text>
+                        {referido.notas ? (
+                            <Text style={[styles.clientRowDate, { marginTop: 4, color: COLORS.textoGris, fontSize: 10 }]} numberOfLines={2}>
+                                Notas: {referido.notas}
+                            </Text>
+                        ) : null}
                     </View>
 
                     {/* Sección Contacto y Ocupación (Derecha) */}
