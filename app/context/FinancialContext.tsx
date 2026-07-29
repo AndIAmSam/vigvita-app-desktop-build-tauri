@@ -1078,7 +1078,7 @@ export const FinancialProvider = ({ children }: { children: ReactNode }) => {
 
     // 3. Envío al Servidor (API REAL)
     try {
-      const API_BASE_URL = process.env.EXPO_PUBLIC_API_URL || "https://vigvita.com.mx";
+      const API_BASE_URL = process.env.EXPO_PUBLIC_API_URL || "https://panel.vigvita.com.mx";
       const targetUrl = `${API_BASE_URL}/api/profiles/new`;
 
       console.log(`[SYNC-V3] Iniciando petición POST a: ${targetUrl}`);
@@ -1172,7 +1172,7 @@ export const FinancialProvider = ({ children }: { children: ReactNode }) => {
 
     setIsFetchingCloud(true);
     try {
-      const API_BASE_URL = process.env.EXPO_PUBLIC_API_URL || "https://vigvita.com.mx";
+      const API_BASE_URL = process.env.EXPO_PUBLIC_API_URL || "https://panel.vigvita.com.mx";
       const authHeaders = { "Authorization": `Bearer ${advisor.token}` };
 
       // ============================================================
@@ -1503,7 +1503,7 @@ export const FinancialProvider = ({ children }: { children: ReactNode }) => {
   ): Promise<{ success: boolean; error?: string }> => {
     try {
       const API_BASE_URL =
-        process.env.EXPO_PUBLIC_API_URL || "https://vigvita.com.mx";
+        process.env.EXPO_PUBLIC_API_URL || "https://panel.vigvita.com.mx";
 
       // Añadimos ?api=true como dicta la v8 para obtener training y is_leader
       const response = await fetch(`${API_BASE_URL}/api/login?api=true`, {
@@ -1592,7 +1592,7 @@ export const FinancialProvider = ({ children }: { children: ReactNode }) => {
     // API v15: Invalidar sesión en el servidor antes de limpiar localmente
     if (advisor?.token && isOnline && advisor.id !== "DEV-MODE") {
       try {
-        const API_BASE_URL = process.env.EXPO_PUBLIC_API_URL || "https://vigvita.com.mx";
+        const API_BASE_URL = process.env.EXPO_PUBLIC_API_URL || "https://panel.vigvita.com.mx";
         await fetch(`${API_BASE_URL}/api/logout`, {
           method: "POST",
           headers: { "Authorization": `Bearer ${advisor.token}` },
@@ -1619,7 +1619,7 @@ export const FinancialProvider = ({ children }: { children: ReactNode }) => {
     if (!isOnline) return true;
 
     try {
-      const API_BASE_URL = process.env.EXPO_PUBLIC_API_URL || "https://vigvita.com.mx";
+      const API_BASE_URL = process.env.EXPO_PUBLIC_API_URL || "https://panel.vigvita.com.mx";
 
       // TRAINEES: Validamos contra /app/d/u.json (solo requiere 'auth') porque
       // /api/profiles/new exige permiso 'advisor' que los trainees no tienen.
@@ -1700,7 +1700,7 @@ export const FinancialProvider = ({ children }: { children: ReactNode }) => {
     if (advisor.isLider) {
       setIsLider(true);
       try {
-        const API_BASE_URL = process.env.EXPO_PUBLIC_API_URL || "https://vigvita.com.mx";
+        const API_BASE_URL = process.env.EXPO_PUBLIC_API_URL || "https://panel.vigvita.com.mx";
         const res = await fetch(`${API_BASE_URL}/api/team`, {
           headers: { "Authorization": `Bearer ${advisor.token}` }
         });
@@ -1744,7 +1744,7 @@ export const FinancialProvider = ({ children }: { children: ReactNode }) => {
       if (!isOnline) return;
 
       try {
-        const API_BASE_URL = process.env.EXPO_PUBLIC_API_URL || "https://vigvita.com.mx";
+        const API_BASE_URL = process.env.EXPO_PUBLIC_API_URL || "https://panel.vigvita.com.mx";
         const response = await fetch(`${API_BASE_URL}/api/me/access-status`, {
           method: "GET",
           headers: { "Authorization": `Bearer ${advisor.token}` },
@@ -2114,7 +2114,7 @@ export const FinancialProvider = ({ children }: { children: ReactNode }) => {
       setIsFetchingCloud(true);
       let fetchSucceeded = false;
       try {
-        const API_BASE_URL = process.env.EXPO_PUBLIC_API_URL || "https://vigvita.com.mx";
+        const API_BASE_URL = process.env.EXPO_PUBLIC_API_URL || "https://panel.vigvita.com.mx";
         const res = await fetch(`${API_BASE_URL}/api/profiles/${cliente.serverId}`, {
           method: "GET",
           headers: { "Authorization": `Bearer ${advisor.token}` }
@@ -2204,7 +2204,7 @@ export const FinancialProvider = ({ children }: { children: ReactNode }) => {
     //     y el usuario tiene sesión activa y no está en modo capacitación ---
     if (serverIdToDelete && advisor?.token && !advisor.training) {
       try {
-        const API_BASE_URL = process.env.EXPO_PUBLIC_API_URL || "https://vigvita.com.mx";
+        const API_BASE_URL = process.env.EXPO_PUBLIC_API_URL || "https://panel.vigvita.com.mx";
         const res = await fetch(`${API_BASE_URL}/api/profiles/${serverIdToDelete}`, {
           method: "DELETE",
           headers: { "Authorization": `Bearer ${advisor.token}` },

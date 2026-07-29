@@ -899,7 +899,7 @@ export default function TableroCopiaScreen() {
                             </Text>
                         </ScrollView>
 
-                        <TouchableOpacity onPress={() => Linking.openURL('https://vigvita.com.mx/vigadn/release-notes')} style={{ marginBottom: 20, paddingVertical: 5 }}>
+                        <TouchableOpacity onPress={() => Linking.openURL('https://panel.vigvita.com.mx/vigadn/release-notes')} style={{ marginBottom: 20, paddingVertical: 5 }}>
                             <Text style={{ fontSize: 14, color: COLORS.azul2, textAlign: 'center', textDecorationLine: 'underline', fontWeight: 'bold' }}>
                                 Ver todas las notas de versiones
                             </Text>

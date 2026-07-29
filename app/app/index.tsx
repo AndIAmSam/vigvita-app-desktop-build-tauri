@@ -82,7 +82,7 @@ export default function LoginScreen() {
     };
 
     const handleForgotPassword = () => {
-        Linking.openURL('https://vigvita.com.mx/forgot-password');
+        Linking.openURL('https://panel.vigvita.com.mx/forgot-password');
     };
 
     return (
@@ -177,11 +177,11 @@ export default function LoginScreen() {
                             {/* <View style={styles.disclaimerContainer}>
                                 <Text style={styles.disclaimerText}>
                                     Al iniciar sesión, aceptas nuestra{' '}
-                                    <Text style={styles.linkText} onPress={() => Linking.openURL('https://vigvita.com.mx/privacy-policy')}>
+                                    <Text style={styles.linkText} onPress={() => Linking.openURL('https://panel.vigvita.com.mx/privacy-policy')}>
                                         Política de Privacidad
                                     </Text>
                                     {' '}y nuestros{' '}
-                                    <Text style={styles.linkText} onPress={() => Linking.openURL('https://vigvita.com.mx/terms-and-conditions')}>
+                                    <Text style={styles.linkText} onPress={() => Linking.openURL('https://panel.vigvita.com.mx/terms-and-conditions')}>
                                         Términos y Condiciones de Uso
                                     </Text>.
                                 </Text>
@@ -207,7 +207,7 @@ export default function LoginScreen() {
                                     style={styles.secondaryLogo}
                                     resizeMode="contain"
                                 />
-                                <Text style={styles.versionText}>v1.3.0</Text>
+                                <Text style={styles.versionText}>v1.3.1</Text>
                             </View>
                         </View>
 
