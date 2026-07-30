@@ -752,6 +752,7 @@ export const FinancialProvider = ({ children }: { children: ReactNode }) => {
       spouse_hobbies: data.perfil?.conyugeHobbies || "",
       spouse_sport: data.perfil?.conyugeDeporte || "",
       dependents: (data.perfil?.dependientes || []).map((d: any) => ({
+        id: d.id || "",
         name: d.nombre || "",
         age: parseNum(d.edad),
         relationship: d.parentesco || "",
@@ -765,6 +766,7 @@ export const FinancialProvider = ({ children }: { children: ReactNode }) => {
       note_risks: data.perfil?.notaRiesgos || "",
     },
     children: (data.hijos || []).map((h: any) => ({
+      id: h.id || "",
       name: h.nombre || "",
       age: parseNum(h.edad),
       university: h.universidad || "",
@@ -839,6 +841,7 @@ export const FinancialProvider = ({ children }: { children: ReactNode }) => {
       decision_maker_name: data.cita?.nombreDecisionMaker || "",
     },
     referrals: (data.referidos || []).map((r: any) => ({
+      id: r.id || "",
       name: r.nombre || "",
       age: parseNum(r.edad),
       marital_status: r.estadoCivil || "",
@@ -1002,12 +1005,21 @@ export const FinancialProvider = ({ children }: { children: ReactNode }) => {
     },
     referidos: unmapReferralsList(data.referrals || []),
     notas: data.notes || "",
-    piramideLevels: (data.priority_levels || []).map((l: any) => ({
-      id: l.id,
-      label: l.label,
-      color: l.color,
-      icon: l.icon,
-    })),
+    piramideLevels: (() => {
+      if (!Array.isArray(data.priority_levels) || data.priority_levels.length === 0) {
+        return [...INITIAL_PIRAMIDE_LEVELS];
+      }
+      const validLevels = data.priority_levels
+        .filter((l: any) => l && l.id && l.label && l.color && l.icon)
+        .map((l: any) => ({
+          id: l.id,
+          label: l.label,
+          color: l.color,
+          icon: l.icon,
+        }));
+      // Si el filtro eliminó todos los items (datos corruptos), usar defaults
+      return validLevels.length > 0 ? validLevels : [...INITIAL_PIRAMIDE_LEVELS];
+    })(),
   });
 
   // --- SYNC COMO JSON PURO ---
@@ -1453,7 +1465,9 @@ export const FinancialProvider = ({ children }: { children: ReactNode }) => {
               if (draftObj.cita) setCita(draftObj.cita);
               if (draftObj.referidos) setReferidos(draftObj.referidos);
               if (draftObj.notas) setNotas(draftObj.notas);
-              if (draftObj.piramideLevels) setPiramideLevels(draftObj.piramideLevels);
+              if (Array.isArray(draftObj.piramideLevels) && draftObj.piramideLevels.length > 0) {
+                setPiramideLevels(draftObj.piramideLevels);
+              }
 
               // En vez de disparar el alert de inmediato, lo dejamos pendiente hasta que el usuario inicie sesión
               setPendingDraftAlert(true);
@@ -2122,16 +2136,64 @@ export const FinancialProvider = ({ children }: { children: ReactNode }) => {
 
         if (res.ok) {
           const fullProfile = await res.json();
-          let parsedData = {};
+          let parsedData: any = {};
           try {
-            parsedData = typeof fullProfile.data === 'string'
-              ? JSON.parse(fullProfile.data)
-              : (fullProfile.data || {});
+            if (typeof fullProfile.data === 'string' && fullProfile.data.trim().length > 0) {
+              parsedData = JSON.parse(fullProfile.data);
+            } else if (typeof fullProfile.data === 'object' && fullProfile.data !== null) {
+              parsedData = fullProfile.data;
+            }
+            // Si parsedData sigue vacío después de parsear, es un perfil sin datos reales
           } catch (e) {
+            console.error("Error parsing profile data from server:", e);
             parsedData = {};
           }
+
+          // Verificar si el servidor devolvió datos reales (al menos debe tener profile/profile.phone/etc.)
+          const hasRealData = parsedData.profile && Object.keys(parsedData.profile).length > 0;
+
+          if (!hasRealData) {
+            // El servidor respondió 200 pero data está vacía/corrupta/null.
+            // Esto puede pasar si el blob encriptado se dañó en el servidor.
+            console.warn("[cargarProspecto] Servidor devolvió 200 pero data vacía para:", cliente.serverId);
+            showAlert(
+              "Los datos completos de este prospecto no están disponibles en el servidor. " +
+              ""
+            );
+            // Cargar solo lo que tenemos del resumen (nombre + referidos)
+            // sin sobrescribir el formulario con datos vacíos
+            setCurrentClientId(cliente.id);
+            setCurrentServerId(cliente.serverId || null);
+            setNombreCliente(cliente.nombre);
+            // Preservar referidos del resumen de listaNube si el servidor no devolvió datos
+            const resumenReferidos = cliente.data?.referidos || [];
+            setReferidos(resumenReferidos);
+            // Resetear el resto a defaults limpios para que el usuario sepa que están vacíos
+            setPerfil(initialPerfil);
+            setHijos([]);
+            setJubilacion(initialJubilacion);
+            setActivos(initialActivos);
+            setPasivos(initialPasivos);
+            setSeguros(initialSeguros);
+            setIngresos(initialIngresos);
+            setGastosBasicos(initialGastosBasicos);
+            setGastosVariables(initialGastosVariables);
+            setFallecimiento(initialFallecimiento);
+            setDetalle(initialDetalle);
+            setCita(initialCita);
+            setNotas("");
+            setPiramideLevels([...INITIAL_PIRAMIDE_LEVELS]);
+            return; // No continuar con el flujo normal
+          }
+
           d = unmapClientData(parsedData);
           fetchSucceeded = true;
+
+          // Preservar referidos: si el servidor no devolvió referidos pero el resumen sí los tiene,
+          // usar los del resumen para no perderlos
+          if ((!d.referidos || d.referidos.length === 0) && cliente.data?.referidos?.length > 0) {
+            d.referidos = cliente.data.referidos;
+          }
 
           // Actualizar listaNube con los datos descargados para no volver a pedirlos
           setListaNube((prev) =>
@@ -2178,7 +2240,11 @@ export const FinancialProvider = ({ children }: { children: ReactNode }) => {
     setCita(d.cita || initialCita);
     setReferidos(d.referidos || []);
     setNotas(d.notas || "");
-    setPiramideLevels(d.piramideLevels || INITIAL_PIRAMIDE_LEVELS);
+    setPiramideLevels(
+      Array.isArray(d.piramideLevels) && d.piramideLevels.length > 0
+        ? d.piramideLevels
+        : [...INITIAL_PIRAMIDE_LEVELS]
+    );
     showAlert(`Cargado: ${cliente.nombre}`);
   };
 
@@ -2254,7 +2320,7 @@ export const FinancialProvider = ({ children }: { children: ReactNode }) => {
     setCita(initialCita);
     setReferidos([]);
     setNotas("");
-    setPiramideLevels(INITIAL_PIRAMIDE_LEVELS);
+    setPiramideLevels([...INITIAL_PIRAMIDE_LEVELS]);
     if (!silencioso) {
       showAlert("Listo para nuevo prospecto.");
       // Auto-sync solo si no fue un reseteo programático (que probablemente ya lanzó su propio sync)
