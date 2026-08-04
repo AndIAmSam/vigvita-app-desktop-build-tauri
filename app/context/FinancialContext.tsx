@@ -1124,6 +1124,71 @@ export const FinancialProvider = ({ children }: { children: ReactNode }) => {
           console.log("No se pudo parsear response de v3 o devolvió vacio. Errores posibles.");
         }
 
+        // --- NUEVO: READ-AFTER-WRITE VALIDATION ---
+        const failedSyncIds = new Set<string>();
+
+        // Descargar y validar lo que el servidor acaba de guardar
+        for (let i = 0; i < clientesPendientes.length; i++) {
+          const pend = clientesPendientes[i];
+          const serverIdAsignado = pend.serverId || returnedUuids[i];
+
+          if (!serverIdAsignado) {
+            console.warn(`[Read-After-Write] Prospecto ${pend.nombre} no obtuvo un UUID. Considerado fallido.`);
+            failedSyncIds.add(pend.id);
+            continue;
+          }
+
+          try {
+            const checkRes = await fetch(`${API_BASE_URL}/api/profiles/${serverIdAsignado}`, {
+              method: "GET",
+              headers: { "Authorization": `Bearer ${advisor?.token || ''}` }
+            });
+
+            if (checkRes.ok) {
+              const fullProfile = await checkRes.json();
+              let parsedData: any = {};
+              try {
+                if (typeof fullProfile.data === 'string' && fullProfile.data.trim().length > 0) {
+                  parsedData = JSON.parse(fullProfile.data);
+                } else if (typeof fullProfile.data === 'object' && fullProfile.data !== null) {
+                  parsedData = fullProfile.data;
+                }
+              } catch (e) {
+                parsedData = {};
+              }
+
+              // Comparar longitud de pirámide
+              const localPiramide = pend.data?.piramideLevels?.length || 0;
+              const serverPiramide = Array.isArray(parsedData.priority_levels) ? parsedData.priority_levels.length : 0;
+              
+              // Comparar longitud de referidos
+              const localReferidos = pend.data?.referidos?.length || 0;
+              const serverReferidos = (fullProfile.referrals || fullProfile.referidos || []).length;
+
+              // Comparar longitud de hijos
+              const localHijos = pend.data?.hijos?.length || 0;
+              const serverHijos = Array.isArray(parsedData.children) ? parsedData.children.length : 0;
+
+              if (localPiramide !== serverPiramide || localReferidos !== serverReferidos || localHijos !== serverHijos) {
+                console.warn(`[Read-After-Write] DATOS CORRUPTOS PARA ${pend.nombre}. Piramide: ${localPiramide}vs${serverPiramide}, Referidos: ${localReferidos}vs${serverReferidos}, Hijos: ${localHijos}vs${serverHijos}.`);
+                failedSyncIds.add(pend.id);
+              } else {
+                console.log(`[Read-After-Write] Validación post-escritura exitosa para ${pend.nombre}.`);
+              }
+            } else {
+              console.warn(`[Read-After-Write] No se pudo descargar a ${pend.nombre} para validar. Reteniendo copia local.`);
+              failedSyncIds.add(pend.id);
+            }
+          } catch(e) {
+            console.error(`[Read-After-Write] Error de red validando a ${pend.nombre}:`, e);
+            failedSyncIds.add(pend.id);
+          }
+        }
+
+        if (failedSyncIds.size > 0) {
+          showAlert(`⚠️ ATENCIÓN: ${failedSyncIds.size} prospecto(s) se enviaron pero el servidor no guardó sus datos completos. Se conservará la copia local y se reintentará en la próxima sincronización para evitar pérdida de datos.`);
+        }
+
         setListaClientes((prev) => {
           // Si el prospecto recién sincronizado es el que está en pantalla, actualizamos currentServerId
           clientesPendientes.forEach((pend, idx) => {
@@ -1134,9 +1199,12 @@ export const FinancialProvider = ({ children }: { children: ReactNode }) => {
 
           const listaActualizada = prev.filter((c) => {
             const syncIndex = clientesPendientes.findIndex(pend => pend.id === c.id);
-            // Si el cliente estaba en la lista de pendientes y se mandó (syncIndex !== -1),
-            // lo REMOVEMOS de storage. Si no estaba (ej. es draft local reciente), se queda.
-            return syncIndex === -1;
+            // Si el cliente NO estaba en pendientes, se queda.
+            if (syncIndex === -1) return true;
+            // Si estaba en pendientes PERO falló la validación Read-After-Write, se queda protegido.
+            if (failedSyncIds.has(c.id)) return true;
+            // Si estaba en pendientes y superó la validación, lo REMOVEMOS de storage (es seguro).
+            return false;
           });
 
           // Persistimos dentro del updater de estado para asegurar la fuente de la verdad
@@ -1267,6 +1335,11 @@ export const FinancialProvider = ({ children }: { children: ReactNode }) => {
 
         setListaNube(mappedCloud);
 
+        // --- 1. Leer el archivo muerto actual (para anexar y rescatar) ---
+        const rawArchive = await storage.getItem<string>("clientes_archive_db");
+        let archiveDB: ClienteGuardado[] = rawArchive ? JSON.parse(rawArchive) : [];
+        let archiveChanged = false;
+
         // --- PURGA SEGURA: Limpiar de local los prospectos que el servidor
         //     confirmó que tiene (profilesOk). Solo se borran locales que:
         //     1. Ya estaban marcados sincronizado: true
@@ -1276,6 +1349,7 @@ export const FinancialProvider = ({ children }: { children: ReactNode }) => {
 
         if (confirmedServerIds.size > 0) {
           setListaClientes((prev) => {
+            console.log("PURGA SEGURA PREV LENGTH:", prev.length, prev);
             const cleaned = prev.filter((c) => {
               // Siempre conservar pendientes (no sincronizados)
               if (!c.sincronizado) return true;
@@ -1283,12 +1357,22 @@ export const FinancialProvider = ({ children }: { children: ReactNode }) => {
               if (!c.serverId) return true;
               // Conservar si el servidor NO lo tiene confirmado
               if (!confirmedServerIds.has(c.serverId)) return true;
+              
               // El servidor confirma que tiene una copia sana → seguro purgar
+              // ANTES DE PURGAR: Lo guardamos en el archivo muerto (Capa extra de redundancia)
+              if (!archiveDB.some(arch => arch.serverId === c.serverId)) {
+                archiveDB.push(c);
+                archiveChanged = true;
+              }
               return false;
             });
 
             if (cleaned.length !== prev.length) {
               storage.setItem("clientes_db", JSON.stringify(cleaned)).catch(console.error);
+              if (archiveChanged) {
+                storage.setItem("clientes_archive_db", JSON.stringify(archiveDB)).catch(console.error);
+                archiveChanged = false; // Reset flag for next block
+              }
             }
             return cleaned;
           });
@@ -1298,51 +1382,53 @@ export const FinancialProvider = ({ children }: { children: ReactNode }) => {
         if (profilesNeedResync.length > 0) {
           let resyncCount = 0;
           let noLocalCopyCount = 0;
+          let rescuedFromArchiveCount = 0;
 
           setListaClientes((prev) => {
-            const updatedList = prev.map((localClient) => {
-              // Buscar si algún perfil del servidor que necesita resync
-              // coincide con este cliente local por su serverId
-              const match = profilesNeedResync.find(
-                (serverProfile) => serverProfile.id === localClient.serverId
-              );
+            const updatedList = [...prev];
 
-              if (match) {
+            profilesNeedResync.forEach((serverProfile) => {
+              // Buscar en la lista principal (activa)
+              const localMatchIndex = updatedList.findIndex(c => c.serverId === serverProfile.id);
+
+              if (localMatchIndex !== -1) {
+                // Existe copia activa: simplemente desmarcamos sincronizado
                 resyncCount++;
-                // Marcar como NO sincronizado para que forceSync lo re-suba
-                // con la data local intacta y el serverId preservado (UPDATE, no CREATE)
-                return {
-                  ...localClient,
-                  sincronizado: false,
+                updatedList[localMatchIndex] = {
+                  ...updatedList[localMatchIndex],
+                  sincronizado: false
                 };
+              } else {
+                // No existe copia activa, ¿ESTARÁ EN EL ARCHIVO MUERTO?
+                const archiveMatchIndex = archiveDB.findIndex(c => c.serverId === serverProfile.id);
+                if (archiveMatchIndex !== -1) {
+                  // ¡RESCATE EXITOSO! Lo sacamos del archivo muerto y lo revivimos en la lista activa
+                  rescuedFromArchiveCount++;
+                  resyncCount++;
+                  const rescuedClient = {
+                    ...archiveDB[archiveMatchIndex],
+                    sincronizado: false // Listo para subirse
+                  };
+                  updatedList.push(rescuedClient);
+                  // Lo quitamos del archivo porque ya está vivo otra vez
+                  archiveDB.splice(archiveMatchIndex, 1);
+                  archiveChanged = true;
+                } else {
+                  // Verdaderamente no tenemos copia ni activa ni muerta
+                  noLocalCopyCount++;
+                }
               }
-              return localClient;
             });
 
-            // Verificar cuántos perfiles del servidor no encontraron copia local
-            const localServerIds = new Set(prev.map(c => c.serverId).filter(Boolean));
-            noLocalCopyCount = profilesNeedResync.filter(
-              (sp) => !localServerIds.has(sp.id)
-            ).length;
-
-            // Persistir la lista actualizada con los flags de resync
-            storage.setItem("clientes_db", JSON.stringify(updatedList)).catch(console.error);
+            // Persistir la lista actualizada si hubo resyncs o rescates
+            if (resyncCount > 0) {
+              storage.setItem("clientes_db", JSON.stringify(updatedList)).catch(console.error);
+              if (archiveChanged) {
+                storage.setItem("clientes_archive_db", JSON.stringify(archiveDB)).catch(console.error);
+              }
+            }
             return updatedList;
           });
-
-          // Informar al usuario sobre la operación de resync (Temporalmente silenciado a petición)
-          /*
-          setTimeout(() => {
-            let msg = `⚠️ El servidor solicitó re-sincronizar ${profilesNeedResync.length} prospecto(s).`;
-            if (resyncCount > 0) {
-              msg += ` Se encontraron ${resyncCount} copia(s) local(es) que se re-enviarán automáticamente.`;
-            }
-            if (noLocalCopyCount > 0) {
-              msg += ` ${noLocalCopyCount} prospecto(s) no tienen copia local y no podrán recuperarse.`;
-            }
-            showAlert(msg);
-          }, 500);
-          */
 
           // Disparar re-sincronización automática para subir las copias locales.
           // IMPORTANTE: skipCloudRefresh = true para evitar bucle infinito
