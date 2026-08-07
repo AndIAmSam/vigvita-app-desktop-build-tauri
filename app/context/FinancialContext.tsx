@@ -1128,12 +1128,20 @@ export const FinancialProvider = ({ children }: { children: ReactNode }) => {
       if (response.status === 201) {
         // ÉXITO: Parsear respuesta para obtener UUIDs
         let returnedUuids: string[] = [];
+        let respuestaCrudaServidor: any = null;
         try {
           const resJson = await response.json();
+          respuestaCrudaServidor = resJson;
           returnedUuids = resJson.data || [];
         } catch (err) {
           console.log("No se pudo parsear response de v3 o devolvió vacio. Errores posibles.");
         }
+        
+        Logger.info(`[VERBOSE] Respuesta del servidor 201`, { 
+            status: response.status, 
+            bodyRespuesta: respuestaCrudaServidor,
+            payloadEnviado: payload
+        });
 
         // --- NUEVO: READ-AFTER-WRITE VALIDATION ---
         const failedSyncIds = new Set<string>();
@@ -1281,10 +1289,20 @@ export const FinancialProvider = ({ children }: { children: ReactNode }) => {
 
             if (sRes.status === 201) {
               let uuid: string | undefined;
-              try { const j = await sRes.json(); uuid = j.data?.[0]; } catch {}
+              let respuestaCrudaRescate: any = null;
+              try { 
+                const j = await sRes.json(); 
+                respuestaCrudaRescate = j;
+                uuid = j.data?.[0]; 
+              } catch {}
               syncedIds.push({ localId: cliente.id, uuid });
               console.log(`[SYNC-RESCUE] ✅ "${cliente.nombre}" sincronizado exitosamente.`);
-              Logger.info(`Rescue Mode: Prospecto sincronizado`, { nombre: cliente.nombre, uuid });
+              Logger.info(`[VERBOSE] Rescue Mode: Prospecto sincronizado`, { 
+                nombre: cliente.nombre, 
+                uuid,
+                bodyRespuesta: respuestaCrudaRescate,
+                payloadEnviado: singlePayload
+              });
             } else {
               const eT = await sRes.text().catch(() => "");
               console.error(`[SYNC-RESCUE] ❌ "${cliente.nombre}" falló individualmente: ${sRes.status} — ${eT}`);
@@ -1864,7 +1882,12 @@ export const FinancialProvider = ({ children }: { children: ReactNode }) => {
         return false;
       }
 
-      Logger.info(`Sesión validada correctamente`, { status: response.status, email: advisor.email });
+      Logger.info(`Sesión validada correctamente`, { 
+        status: response.status, 
+        email: advisor.email,
+        urlSolicitada: targetUrl,
+        metodo: isTrainee ? "GET" : "POST"
+      });
 
       // Para asesores normales: 422 (body empty) = auth OK. Para trainees: 200 = auth OK.
       if (!isTrainee && response.status !== 422 && response.status !== 201 && response.status !== 200) {
@@ -2184,7 +2207,13 @@ export const FinancialProvider = ({ children }: { children: ReactNode }) => {
     await storage.setItem("clientes_db", JSON.stringify(nuevaLista));
     setSyncStatus("pending"); // Activa alerta visual
     showAlert("Prospecto guardado exitosamente.");
-    Logger.info(`Prospecto guardado localmente`, { id: nuevoClienteObj.id, nombre: nuevoClienteObj.nombre });
+    
+    // Log detallado y completo de la estructura generada
+    Logger.info(`Prospecto guardado localmente`, { 
+      id: nuevoClienteObj.id, 
+      nombre: nuevoClienteObj.nombre,
+      objetoCompletoGuardado: nuevoClienteObj 
+    });
 
     // Disparar sincronización automática pasando el contexto actualizado para evitar carrera
     forceSync(nuevaLista);
