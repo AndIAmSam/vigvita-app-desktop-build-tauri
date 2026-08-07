@@ -725,7 +725,9 @@ export const FinancialProvider = ({ children }: { children: ReactNode }) => {
   const parseNum = (val: any): number => {
     if (!val) return 0;
     const num = Number(val);
-    return isNaN(num) ? 0 : num;
+    if (isNaN(num)) return 0;
+    // Redondeamos a 2 decimales máximo para probar si la API los acepta (ej. 785062.97)
+    return Math.round(num * 100) / 100;
   };
 
   // --- HELPER: Mapeo de campos español → inglés para el payload ---
@@ -753,7 +755,6 @@ export const FinancialProvider = ({ children }: { children: ReactNode }) => {
       spouse_hobbies: data.perfil?.conyugeHobbies || "",
       spouse_sport: data.perfil?.conyugeDeporte || "",
       dependents: (data.perfil?.dependientes || []).map((d: any) => ({
-        id: d.id || "",
         name: d.nombre || "",
         age: parseNum(d.edad),
         relationship: d.parentesco || "",
@@ -767,7 +768,6 @@ export const FinancialProvider = ({ children }: { children: ReactNode }) => {
       note_risks: data.perfil?.notaRiesgos || "",
     },
     children: (data.hijos || []).map((h: any) => ({
-      id: h.id || "",
       name: h.nombre || "",
       age: parseNum(h.edad),
       university: h.universidad || "",

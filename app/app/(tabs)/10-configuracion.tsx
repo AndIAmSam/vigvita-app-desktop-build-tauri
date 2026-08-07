@@ -26,7 +26,7 @@ export default function ConfiguracionScreen() {
     // --- ESTADOS CONTRASEÑA LOGS ---
     const [modalLogPasswordVisible, setModalLogPasswordVisible] = useState(false);
     const [logPassword, setLogPassword] = useState("");
-    const ADMIN_PASSWORD = "VIG-ADN-9274"; // Contraseña interna para descargar logs
+    const ADMIN_PASSWORD = "VIG-ADN-7249"; // Contraseña interna para descargar logs
 
     const handleLogout = () => {
         setModalLogoutVisible(true);
@@ -104,7 +104,7 @@ export default function ConfiguracionScreen() {
                 </View>
 
                 <ScrollView contentContainerStyle={styles.scrollContent} showsVerticalScrollIndicator={false}>
-                    
+
                     {/* --- HEADER --- */}
                     <Animated.View style={{ opacity: fadeAnim, transform: [{ translateY: slideAnim }] }}>
                         <View style={styles.header}>
@@ -127,7 +127,7 @@ export default function ConfiguracionScreen() {
                             <Text style={styles.cardTitle}>General</Text>
                         </View>
 
-                        <TouchableOpacity 
+                        <TouchableOpacity
                             style={styles.optionItem}
                             onPress={() => setModalNotasVisible(true)}
                             activeOpacity={0.7}
@@ -137,7 +137,7 @@ export default function ConfiguracionScreen() {
                             </View>
                             <View style={styles.optionTextContainer}>
                                 <Text style={styles.optionTitle}>Notas de versión</Text>
-                                <Text style={styles.optionDesc}>Descubre las novedades de VigADN v1.3.4</Text>
+                                <Text style={styles.optionDesc}>Descubre las novedades de VigADN v1.3.5</Text>
                             </View>
                             <FontAwesome name="chevron-right" size={14} color={COLORS.textoGris} />
                         </TouchableOpacity>
@@ -151,7 +151,7 @@ export default function ConfiguracionScreen() {
                             <Text style={styles.cardTitle}>Soporte Técnico</Text>
                         </View>
 
-                        <TouchableOpacity 
+                        <TouchableOpacity
                             style={styles.optionItem}
                             onPress={handleDownloadLogs}
                             activeOpacity={0.7}
@@ -175,7 +175,7 @@ export default function ConfiguracionScreen() {
                             <Text style={styles.cardTitle}>Cuenta</Text>
                         </View>
 
-                        <TouchableOpacity 
+                        <TouchableOpacity
                             style={[styles.optionItem, { borderColor: '#fee2e2' }]}
                             onPress={handleLogout}
                             activeOpacity={0.7}
@@ -191,7 +191,9 @@ export default function ConfiguracionScreen() {
                         </TouchableOpacity>
                     </Animated.View>
 
-                    <View style={{ height: 100 }} />
+                    <View style={{ height: 40 }} />
+                    <Text style={{ textAlign: 'center', fontSize: 10, color: '#d1d5db', letterSpacing: 1 }}>VIGADN v1.3.5</Text>
+                    <View style={{ height: 80 }} />
                 </ScrollView>
 
                 {/* --- MODAL NOTAS DE VERSIÓN (Migrado desde Tablero) --- */}
@@ -203,7 +205,7 @@ export default function ConfiguracionScreen() {
                                 <View style={{ flex: 1 }}>
                                     <Text style={styles.modalSubtitleCierre}>Notas de Versión</Text>
                                     <Text style={styles.modalTitleCierre} numberOfLines={1}>Novedades de VigADN</Text>
-                                    <Text style={styles.modalClientDate}>Versión 1.3.4</Text>
+                                    <Text style={styles.modalClientDate}>Versión 1.3.5</Text>
                                 </View>
                                 <TouchableOpacity style={styles.closeBtnIcon} onPress={() => setModalNotasVisible(false)}>
                                     <FontAwesome name="times" size={16} color={COLORS.textoGris} />
@@ -211,11 +213,10 @@ export default function ConfiguracionScreen() {
                             </View>
 
                             <ScrollView style={{ width: '100%', maxHeight: 350, marginBottom: 10, paddingRight: 5 }} showsVerticalScrollIndicator={true}>
-                                <Text style={{ fontSize: 15, fontWeight: 'bold', color: COLORS.azul1, marginTop: 5, marginBottom: 8 }}>Generales (v1.3.4):</Text>
+                                <Text style={{ fontSize: 15, fontWeight: 'bold', color: COLORS.azul1, marginTop: 5, marginBottom: 8 }}>Generales (v1.3.5):</Text>
                                 <Text style={{ fontSize: 14, color: COLORS.textoGris, lineHeight: 22, textAlign: 'left', marginBottom: 15 }}>
-                                    • Se integró una nueva <Text style={{ fontWeight: 'bold' }}>pestaña de configuración</Text> centralizada.{'\n'}
-                                    • Se movió la opción de <Text style={{ fontWeight: 'bold' }}>cerrar sesión</Text> a la nueva pestaña para mayor seguridad.{'\n'}
-                                    • Se implementó un sistema interno para la <Text style={{ fontWeight: 'bold' }}>descarga de registros (logs)</Text>.
+                                    • <Text style={{ fontWeight: 'bold' }}>Seguridad en Registros:</Text> Se implementó un código de acceso para proteger la descarga de registros (logs) del sistema.{'\n'}
+                                    • <Text style={{ fontWeight: 'bold' }}>Correcciones menores:</Text> Mejoras de estabilidad y rendimiento.
                                 </Text>
                             </ScrollView>
 
@@ -263,7 +264,7 @@ export default function ConfiguracionScreen() {
                                     onPress={() => setModalLogoutVisible(false)}>
                                     <Text style={{ fontWeight: 'bold', color: COLORS.textoGris, fontSize: 15 }}>Cancelar</Text>
                                 </TouchableOpacity>
-                                
+
                                 <TouchableOpacity
                                     style={{ flex: 1, paddingVertical: 14, borderRadius: 12, backgroundColor: '#ef4444', alignItems: 'center', flexDirection: 'row', justifyContent: 'center', gap: 8 }}
                                     onPress={confirmLogout}>
@@ -321,7 +322,7 @@ export default function ConfiguracionScreen() {
                                     onPress={() => setModalLogPasswordVisible(false)}>
                                     <Text style={{ fontWeight: 'bold', color: COLORS.textoGris, fontSize: 15 }}>Cancelar</Text>
                                 </TouchableOpacity>
-                                
+
                                 <TouchableOpacity
                                     style={{ flex: 1, paddingVertical: 14, borderRadius: 12, backgroundColor: COLORS.verde, alignItems: 'center', flexDirection: 'row', justifyContent: 'center', gap: 8 }}
                                     onPress={verifyAndDownloadLogs}>
