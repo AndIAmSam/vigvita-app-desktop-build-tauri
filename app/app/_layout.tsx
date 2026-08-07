@@ -8,8 +8,34 @@ import { useEffect } from 'react';
 import 'react-native-reanimated';
 
 import { useColorScheme } from '@/components/useColorScheme';
-
+import { Platform } from 'react-native';
+import { Logger } from '../utils/logger';
 import { FinancialProvider } from '../context/FinancialContext';
+
+// --- INTERCEPTOR GLOBAL DE CRASHES ---
+if (Platform.OS === 'web') {
+  if (typeof window !== 'undefined') {
+    window.onerror = function (message, source, lineno, colno, error) {
+      Logger.error(`Global Error (Web): ${message}`, { source, lineno, colno, stack: error?.stack });
+      return false; // Permitir que el navegador lo reporte también
+    };
+    window.addEventListener('unhandledrejection', function (event) {
+      Logger.error(`Unhandled Promise Rejection (Web): ${event.reason}`, { reason: event.reason });
+    });
+  }
+} else {
+  // Manejador global para React Native (Mobile)
+  const globalAny: any = global;
+  if (globalAny.ErrorUtils) {
+    const originalHandler = globalAny.ErrorUtils.getGlobalHandler();
+    globalAny.ErrorUtils.setGlobalHandler((error: any, isFatal?: boolean) => {
+      Logger.error(`Fatal Crash (Mobile)`, { error, isFatal });
+      if (originalHandler) {
+        originalHandler(error, isFatal);
+      }
+    });
+  }
+}
 
 export {
   // Catch any errors thrown by the Layout component.

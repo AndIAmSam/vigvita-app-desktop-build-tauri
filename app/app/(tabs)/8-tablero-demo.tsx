@@ -60,7 +60,7 @@ export default function TableroCopiaScreen() {
     const [modalAsesoresVisible, setModalAsesoresVisible] = useState(false);
 
     // --- ESTADO NOTAS DE VERSIÓN ---
-    const [modalNotasVisible, setModalNotasVisible] = useState(false);
+
 
     // --- ESTADOS PARA SECUENCIA DE GUARDADO NUEVO PROSPECTO ---
     const [acompSaveModalVisible, setAcompSaveModalVisible] = useState(false);
@@ -419,20 +419,16 @@ export default function TableroCopiaScreen() {
                         </View>
 
                         {/* Fila Bottom: Bienvenida y Avatar */}
-                        <View style={styles.headerGreeting}>
+                        <View style={[styles.headerGreeting, { justifyContent: 'center' }]}>
                             <View style={styles.avatarContainer}>
                                 <View style={styles.avatarCircle}>
                                     <FontAwesome name="user" size={32} color={COLORS.azul1} />
                                 </View>
                             </View>
-                            <View style={{ flex: 1, marginRight: 10, justifyContent: 'center' }}>
+                            <View style={{ justifyContent: 'center' }}>
                                 <Text style={styles.panelLabel}>PANEL DE ASESOR</Text>
                                 <Text style={styles.userNameText} numberOfLines={1}>{advisor?.nombre || ''}</Text>
                             </View>
-                            <TouchableOpacity onPress={handleLogout} style={styles.logoutBtn} activeOpacity={0.7}>
-                                <FontAwesome name="sign-out" size={16} color={COLORS.rojoTexto} />
-                                <Text style={styles.logoutText}>Salir</Text>
-                            </TouchableOpacity>
                         </View>
                     </View>
                 </Animated.View>
@@ -875,53 +871,14 @@ export default function TableroCopiaScreen() {
             </Modal>
 
             {/* MODAL NOTAS DE VERSIÓN */}
-            <Modal visible={modalNotasVisible} animationType="fade" transparent>
-                <View style={styles.modalOverlayCierre}>
-                    <TouchableOpacity style={StyleSheet.absoluteFill} activeOpacity={1} onPress={() => setModalNotasVisible(false)} />
-                    <View style={styles.modalContentCierre}>
-                        <View style={styles.modalHeaderCierre}>
-                            <View style={{ flex: 1 }}>
-                                <Text style={styles.modalSubtitleCierre}>Notas de Versión</Text>
-                                <Text style={styles.modalTitleCierre} numberOfLines={1}>Novedades de VigADN</Text>
-                                <Text style={styles.modalClientDate}>Versión 1.3.0</Text>
-                            </View>
-                            <TouchableOpacity style={styles.closeBtnIcon} onPress={() => setModalNotasVisible(false)}>
-                                <FontAwesome name="times" size={16} color={COLORS.textoGris} />
-                            </TouchableOpacity>
-                        </View>
-
-                        <ScrollView style={{ width: '100%', maxHeight: 350, marginBottom: 10, paddingRight: 5 }} showsVerticalScrollIndicator={true}>
-                            <Text style={{ fontSize: 15, fontWeight: 'bold', color: COLORS.azul1, marginTop: 5, marginBottom: 8 }}>Generales (v1.3.0):</Text>
-                            <Text style={{ fontSize: 14, color: COLORS.textoGris, lineHeight: 22, textAlign: 'left', marginBottom: 15 }}>
-                                • <Text style={{ fontWeight: 'bold' }}>Notas en Referidos:</Text> Ahora puedes añadir y guardar comentarios o notas personalizadas para cada referido.{'\n'}
-                                • <Text style={{ fontWeight: 'bold' }}>Avisos de Acceso:</Text> Se implementó un nuevo sistema de alertas visuales que te notificará con anticipación si tu acceso a la plataforma está por expirar o ya expiró.{'\n'}
-                                • <Text style={{ fontWeight: 'bold' }}>Limpieza Automática:</Text> Al guardar un nuevo prospecto en tu tablero, el ADN se limpiará automáticamente para que puedas comenzar a capturar el siguiente de forma más fluida.
-                            </Text>
-                        </ScrollView>
-
-                        <TouchableOpacity onPress={() => Linking.openURL('https://panel.vigvita.com.mx/vigadn/release-notes')} style={{ marginBottom: 20, paddingVertical: 5 }}>
-                            <Text style={{ fontSize: 14, color: COLORS.azul2, textAlign: 'center', textDecorationLine: 'underline', fontWeight: 'bold' }}>
-                                Ver todas las notas de versiones
-                            </Text>
-                        </TouchableOpacity>
-
-                        <TouchableOpacity
-                            style={{ width: '100%', paddingVertical: 14, borderRadius: 12, backgroundColor: COLORS.azul1, alignItems: 'center' }}
-                            onPress={() => setModalNotasVisible(false)}>
-                            <Text style={{ fontWeight: 'bold', color: '#fff', fontSize: 15 }}>Cerrar</Text>
-                        </TouchableOpacity>
-                    </View>
-                </View>
-            </Modal>
-
-            {/* BOTÓN FLOTANTE DE NOTAS DE VERSIÓN */}
+            {/* BOTÓN FLOTANTE DE CONFIGURACIÓN */}
             <TouchableOpacity
                 style={styles.fabNotas}
-                onPress={() => setModalNotasVisible(true)}
+                onPress={() => router.push('/(tabs)/10-configuracion')}
                 activeOpacity={0.8}
             >
-                <FontAwesome name="info-circle" size={16} color="#fff" style={{ marginRight: 6 }} />
-                <Text style={styles.fabNotasText}>Notas de versión</Text>
+                <FontAwesome name="cog" size={16} color="#fff" style={{ marginRight: 6 }} />
+                <Text style={styles.fabNotasText}>Configuración</Text>
             </TouchableOpacity>
         </View>
     );

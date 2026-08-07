@@ -8,6 +8,7 @@ import React, {
 import { Modal, View, Text, TouchableOpacity, StyleSheet, Alert, Platform } from "react-native";
 import AsyncStorage from "@react-native-async-storage/async-storage";
 import localforage from "localforage";
+import { Logger } from "../utils/logger";
 import { LISTA_UNIVERSIDADES, getCostoUniversidad } from "../constants/UniversityData";
 
 const storage = {
@@ -1073,7 +1074,7 @@ export const FinancialProvider = ({ children }: { children: ReactNode }) => {
           acquisition_status: acqStatus,
           accompaniment_status: cliente.accompanimentStatus || "unaccompanied",
           closing_types: cliente.tiposCierre || (cliente.tipoCierre ? [cliente.tipoCierre] : []),
-          data: mapClientData(cliente.data)
+          data: mapClientData(cliente.data || {})
         };
 
         if (cliente.serverId) {
@@ -1096,13 +1097,22 @@ export const FinancialProvider = ({ children }: { children: ReactNode }) => {
       console.log(`[SYNC-V3] Iniciando petición POST a: ${targetUrl}`);
       console.log(`[SYNC-V3] Payload exacto enviado:`, JSON.stringify(payload, null, 2));
 
+      Logger.info(`Sincronización iniciada`, { clientes: clientesPendientes.length, url: targetUrl });
+
+      // Sanitizar: eliminar caracteres de control invisibles (ej. null bytes \x00)
+      // que algunos parsers estrictos del servidor rechazan con 400.
+      // Para datos normales, esta función es transparente (no altera nada visible).
+      const sanitizedBody = JSON.stringify(payload, (_key, value) =>
+        typeof value === 'string' ? value.replace(/[\x00-\x08\x0B\x0C\x0E-\x1F\x7F]/g, '') : value
+      );
+
       const response = await fetch(targetUrl, {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
           'Authorization': `Bearer ${advisor?.token || ''}`
         },
-        body: JSON.stringify(payload)
+        body: sanitizedBody
       });
 
       console.log(`[SYNC-V3] Respuesta del servidor - Status: ${response.status}`);
@@ -1110,6 +1120,7 @@ export const FinancialProvider = ({ children }: { children: ReactNode }) => {
       // NUEVO: INTERCEPTOR DE SEGURIDAD EN GUARDADO SILENCIOSO
       if (response.status === 401 || response.status === 403 || response.status === 404) {
         console.warn("🔒 SESIÓN DECLINADA DURANTE SINCRONIZACIÓN: Usuario eliminado o token inválido.");
+        Logger.warn(`Sincronización rechazada (Sesión inválida)`, { status: response.status });
         await logout();
         return "ERROR: Sesión Inválida. Su acceso ha sido revocado y la sesión cerrada.";
       }
@@ -1225,7 +1236,100 @@ export const FinancialProvider = ({ children }: { children: ReactNode }) => {
           }, 500);
         }
 
+        Logger.info(`Sincronización exitosa`, { prospectosSincronizados: clientesPendientes.length });
         return "Sincronización exitosa con el servidor.";
+      } else if (response.status === 400 && clientesPendientes.length > 1) {
+        // ── RESCUE MODE ──────────────────────────────────────────────────
+        // El batch completo falló con 400. Reintentamos cada prospecto
+        // individualmente para aislar cuál tiene el problema y permitir
+        // que los buenos se sincronicen sin bloquearse.
+        // ──────────────────────────────────────────────────────────────────
+        console.warn(`[SYNC-RESCUE] Batch 400. Reintentando ${clientesPendientes.length} prospectos individualmente...`);
+        Logger.warn(`Batch falló con 400. Iniciando Rescue Mode para ${clientesPendientes.length} prospectos`);
+
+        const syncedIds: { localId: string; uuid?: string }[] = [];
+        const failedNames: string[] = [];
+
+        for (const cliente of clientesPendientes) {
+          try {
+            let ls = cliente.estatusAdquisicion || (cliente.estatusCierre ? "cierre" : "en_espera");
+            let aq = "pending";
+            if (ls === "en_espera") aq = "pending";
+            if (ls === "descartado") aq = "cancelled";
+            if (ls === "cierre") aq = "completed";
+
+            const singlePayload = { clients: [{
+              name: cliente.nombre.substring(0, 100),
+              is_closed: aq === "completed" || cliente.estatusCierre === true,
+              acquisition_status: aq,
+              accompaniment_status: cliente.accompanimentStatus || "unaccompanied",
+              closing_types: cliente.tiposCierre || (cliente.tipoCierre ? [cliente.tipoCierre] : []),
+              data: mapClientData(cliente.data || {}),
+              ...(cliente.serverId ? { id: cliente.serverId } : {}),
+              ...(cliente.asesorAsignado?.id ? { advisor_id: cliente.asesorAsignado.id } : {}),
+            }]};
+
+            const sBody = JSON.stringify(singlePayload, (_k, v) =>
+              typeof v === 'string' ? v.replace(/[\x00-\x08\x0B\x0C\x0E-\x1F\x7F]/g, '') : v
+            );
+
+            const sRes = await fetch(targetUrl, {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${advisor?.token || ''}` },
+              body: sBody
+            });
+
+            if (sRes.status === 201) {
+              let uuid: string | undefined;
+              try { const j = await sRes.json(); uuid = j.data?.[0]; } catch {}
+              syncedIds.push({ localId: cliente.id, uuid });
+              console.log(`[SYNC-RESCUE] ✅ "${cliente.nombre}" sincronizado exitosamente.`);
+              Logger.info(`Rescue Mode: Prospecto sincronizado`, { nombre: cliente.nombre, uuid });
+            } else {
+              const eT = await sRes.text().catch(() => "");
+              console.error(`[SYNC-RESCUE] ❌ "${cliente.nombre}" falló individualmente: ${sRes.status} — ${eT}`);
+              failedNames.push(cliente.nombre);
+              Logger.error(`Rescue Mode: Prospecto falló`, { 
+                nombre: cliente.nombre, 
+                status: sRes.status, 
+                body: eT,
+                payloadEnviado: singlePayload 
+              });
+            }
+          } catch (e) {
+            console.error(`[SYNC-RESCUE] ❌ Excepción para "${cliente.nombre}":`, e);
+            failedNames.push(cliente.nombre);
+            Logger.error(`Rescue Mode: Excepción en prospecto`, { nombre: cliente.nombre, error: e });
+          }
+        }
+
+        // Procesar resultados del rescate
+        if (syncedIds.length > 0) {
+          setListaClientes((prev) => {
+            syncedIds.forEach(({ localId, uuid }) => {
+              if (localId === currentClientId && uuid) setCurrentServerId(uuid);
+            });
+            const successSet = new Set(syncedIds.map(s => s.localId));
+            const updated = prev.filter(c => !successSet.has(c.id));
+            storage.setItem("clientes_db", JSON.stringify(updated)).catch(console.error);
+            return updated;
+          });
+        }
+
+        if (failedNames.length > 0 && syncedIds.length > 0) {
+          setSyncStatus("pending");
+          showAlert(`✅ ${syncedIds.length} prospecto(s) sincronizado(s) con éxito.\n\n⚠️ No se pudo sincronizar: ${failedNames.join(", ")}.\nSus datos están seguros en tu dispositivo.`);
+        } else if (failedNames.length > 0) {
+          setSyncStatus("pending");
+          showAlert(`No se pudieron sincronizar: ${failedNames.join(", ")}. Tus datos están seguros en tu dispositivo.`);
+        } else {
+          setSyncStatus("synced");
+          setLastSyncTime(new Date().toLocaleTimeString());
+          if (!skipCloudRefresh) setTimeout(() => fetchSincronizadosNube(), 500);
+        }
+
+        return syncedIds.length > 0 ? "Sincronización parcial completada." : "ERROR: Todos los prospectos fallaron individualmente.";
+
       } else {
         // Fallo al crear en servidor
         const errText = await response.text();
@@ -1233,12 +1337,18 @@ export const FinancialProvider = ({ children }: { children: ReactNode }) => {
         console.log("PAYLOAD SENT:", JSON.stringify(payload, null, 2));
         setSyncStatus("pending");
         showAlert(`Error ${response.status}: ${errText.substring(0, 100)}... `);
+        Logger.error(`Fallo de sincronización general`, { 
+          status: response.status, 
+          body: errText,
+          payloadEnviado: payload
+        });
         return "ERROR: Fallo al crear perfiles en el servidor.";
       }
     } catch (error) {
       console.error("Error al sincronizar:", error);
       setSyncStatus("pending");
       showAlert("Error de red al intentar sincronizar.");
+      Logger.error(`Excepción durante la sincronización`, error);
       return "ERROR: Excepción durante la sincronización.";
     }
   };
@@ -1616,6 +1726,8 @@ export const FinancialProvider = ({ children }: { children: ReactNode }) => {
 
       if (response.ok) {
         const data = await response.json();
+        
+        Logger.info(`Login exitoso`, { email });
 
         // Creamos un usuario con el token devuelto
         const user: Advisor = {
@@ -1645,11 +1757,14 @@ export const FinancialProvider = ({ children }: { children: ReactNode }) => {
         try {
           const errorData = await response.json();
           if (errorData && errorData.error) {
+            Logger.warn(`Intento de login fallido`, { email, error: errorData.error });
             return { success: false, error: errorData.error };
           }
         } catch (e) {
           // Fallback a códigos de estado si no hay JSON
         }
+
+        Logger.warn(`Intento de login fallido`, { email, status: response.status });
 
         // Fallbacks de seguridad por si el servidor no devuelve JSON con "error"
         if (response.status === 401)
@@ -1661,9 +1776,10 @@ export const FinancialProvider = ({ children }: { children: ReactNode }) => {
 
         return { success: false, error: "server_error" };
       }
-    } catch (error) {
+    } catch (error: any) {
       console.error("Login error:", error);
-      return { success: false, error: "network_error" };
+      Logger.error(`Excepción en login`, error);
+      return { success: false, error: "Error de red al conectar al servidor" };
     }
   };
 
@@ -1689,6 +1805,7 @@ export const FinancialProvider = ({ children }: { children: ReactNode }) => {
   };
 
   const logout = async () => {
+    Logger.info(`Usuario hizo logout`);
     // API v15: Invalidar sesión en el servidor antes de limpiar localmente
     if (advisor?.token && isOnline && advisor.id !== "DEV-MODE") {
       try {
@@ -1741,10 +1858,13 @@ export const FinancialProvider = ({ children }: { children: ReactNode }) => {
       // El middleware auth lanza 404/401 si el usuario fue borrado o si el token caducó.
       // Esto aplica TANTO para trainees como para asesores normales.
       if (response.status === 404 || response.status === 401 || response.status === 403) {
+        Logger.warn(`Validación de sesión fallida (token revocado/vencido)`, { status: response.status, email: advisor.email });
         Alert.alert("Error de Autenticación", `El servidor denegó tu sesión (Código: ${response.status}). Saliendo...`);
         await logout(); // Force logout inmediatamente
         return false;
       }
+
+      Logger.info(`Sesión validada correctamente`, { status: response.status, email: advisor.email });
 
       // Para asesores normales: 422 (body empty) = auth OK. Para trainees: 200 = auth OK.
       if (!isTrainee && response.status !== 422 && response.status !== 201 && response.status !== 200) {
@@ -2064,6 +2184,7 @@ export const FinancialProvider = ({ children }: { children: ReactNode }) => {
     await storage.setItem("clientes_db", JSON.stringify(nuevaLista));
     setSyncStatus("pending"); // Activa alerta visual
     showAlert("Prospecto guardado exitosamente.");
+    Logger.info(`Prospecto guardado localmente`, { id: nuevoClienteObj.id, nombre: nuevoClienteObj.nombre });
 
     // Disparar sincronización automática pasando el contexto actualizado para evitar carrera
     forceSync(nuevaLista);

@@ -51,7 +51,7 @@ function CustomTabBar({ state, descriptors, navigation }: any) {
   const isWarningActive = accessExpiresAt && (new Date(accessExpiresAt).getTime() - Date.now() > 0);
 
   // Filtramos las rutas ocultas
-  const visibleRoutes = state.routes.filter((r: any) => !['_sitemap', '+not-found', '9-notas', '8-tablero', '8-tablero-old'].includes(r.name));
+  const visibleRoutes = state.routes.filter((r: any) => !['_sitemap', '+not-found', '9-notas', '8-tablero', '8-tablero-old', '10-configuracion'].includes(r.name));
 
   const totalTabs = visibleRoutes.length;
 
@@ -286,6 +286,7 @@ export default function TabLayout() {
         <Tabs.Screen name="8-tablero" options={{ href: null }} />
         <Tabs.Screen name="8-tablero-old" options={{ href: null }} />
         <Tabs.Screen name="9-notas" options={{ href: null }} />
+        <Tabs.Screen name="10-configuracion" options={{ href: null }} />
       </Tabs>
 
       {/* Indicador de estado de conexión/sincronización — SIEMPRE visible en tablero */}
