@@ -215,8 +215,7 @@ export default function ConfiguracionScreen() {
                             <ScrollView style={{ width: '100%', maxHeight: 350, marginBottom: 10, paddingRight: 5 }} showsVerticalScrollIndicator={true}>
                                 <Text style={{ fontSize: 15, fontWeight: 'bold', color: COLORS.azul1, marginTop: 5, marginBottom: 8 }}>Generales (v1.3.5):</Text>
                                 <Text style={{ fontSize: 14, color: COLORS.textoGris, lineHeight: 22, textAlign: 'left', marginBottom: 15 }}>
-                                    • <Text style={{ fontWeight: 'bold' }}>Seguridad en Registros:</Text> Se implementó un código de acceso para proteger la descarga de registros (logs) del sistema.{'\n'}
-                                    • <Text style={{ fontWeight: 'bold' }}>Correcciones menores:</Text> Mejoras de estabilidad y rendimiento.
+                                    • <Text style={{ fontWeight: 'bold' }}>Correcciones menores:</Text> Mejoras de estabilidad y rendimiento interno.
                                 </Text>
                             </ScrollView>
 
