@@ -205,7 +205,7 @@ export default function ConfiguracionScreen() {
                                 <View style={{ flex: 1 }}>
                                     <Text style={styles.modalSubtitleCierre}>Notas de Versión</Text>
                                     <Text style={styles.modalTitleCierre} numberOfLines={1}>Novedades de VigADN</Text>
-                                    <Text style={styles.modalClientDate}>Versión 1.3.5</Text>
+                                    <Text style={styles.modalClientDate}>Versión 1.3.6</Text>
                                 </View>
                                 <TouchableOpacity style={styles.closeBtnIcon} onPress={() => setModalNotasVisible(false)}>
                                     <FontAwesome name="times" size={16} color={COLORS.textoGris} />

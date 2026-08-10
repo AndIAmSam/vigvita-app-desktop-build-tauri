@@ -27,6 +27,8 @@ const renderProvider = () => {
   );
 };
 
+const delay = (ms: number) => new Promise(resolve => setTimeout(resolve, ms));
+
 describe('FinancialContext - cargarProspecto & Data Mapping', () => {
   let originalFetch: typeof global.fetch;
 
@@ -87,6 +89,7 @@ describe('FinancialContext - cargarProspecto & Data Mapping', () => {
     expect(contextRef.piramideLevels.length).toBe(4);
     expect(contextRef.perfil.telefono).toBe('');
 
+    await act(async () => { await delay(600); });
     root.unmount();
   });
 
@@ -150,6 +153,7 @@ describe('FinancialContext - cargarProspecto & Data Mapping', () => {
     expect(contextRef.hijos.length).toBe(1);
     expect(contextRef.hijos[0].id).toBe('hijo-1');
 
+    await act(async () => { await delay(600); });
     root.unmount();
   });
 
@@ -180,7 +184,7 @@ describe('FinancialContext - cargarProspecto & Data Mapping', () => {
 
     // Dar tiempo a que el useEffect inicial termine de cargar 'clientes_db'
     await act(async () => {
-      await new Promise(resolve => setTimeout(resolve, 50));
+      await delay(50);
     });
 
     await act(async () => {
@@ -231,6 +235,7 @@ describe('FinancialContext - cargarProspecto & Data Mapping', () => {
     expect(lastArchiveSave.find((c: any) => c.nombre === 'Pedro')).toBeDefined(); // Pedro entró al cementerio
     expect(lastArchiveSave.find((c: any) => c.nombre === 'Ana (Archivo Muerto)')).toBeUndefined(); // Ana salió del cementerio
 
+    await act(async () => { await delay(600); });
     root.unmount();
   });
 
@@ -253,7 +258,7 @@ describe('FinancialContext - cargarProspecto & Data Mapping', () => {
       root = renderProvider();
     });
     await act(async () => {
-      await new Promise(resolve => setTimeout(resolve, 50)); // Esperar inicialización
+      await delay(50); // Esperar inicialización
       await contextRef.bypassLoginForDev('asesor');
     });
 
@@ -262,7 +267,8 @@ describe('FinancialContext - cargarProspecto & Data Mapping', () => {
       // 1. Petición POST inicial de sincronización
       if (options?.method === 'POST') {
         return Promise.resolve({
-          status: 201,
+          ok: true, status: 201,
+          text: () => Promise.resolve(''),
           json: () => Promise.resolve({ data: ['uuid-1', 'uuid-2'] })
         });
       }
@@ -285,7 +291,7 @@ describe('FinancialContext - cargarProspecto & Data Mapping', () => {
       }
 
       // Fallback genérico para llamadas inesperadas
-      return Promise.resolve({ ok: true, json: () => Promise.resolve({ profiles: [] }) });
+      return Promise.resolve({ ok: true, status: 200, text: () => Promise.resolve(''), json: () => Promise.resolve({ profiles: [] }) });
     }) as jest.Mock;
 
     // Disparamos la subida
@@ -304,6 +310,7 @@ describe('FinancialContext - cargarProspecto & Data Mapping', () => {
     const corruptoRetenido = lastDbSave.find((c: any) => c.nombre === 'Corrupto');
     expect(corruptoRetenido).toBeDefined();
     
+    await act(async () => { await delay(600); });
     root.unmount();
   });
 });

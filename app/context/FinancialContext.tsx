@@ -5,7 +5,7 @@ import React, {
   ReactNode,
   useEffect,
 } from "react";
-import { Modal, View, Text, TouchableOpacity, StyleSheet, Alert, Platform } from "react-native";
+import { Modal, View, Text, TouchableOpacity, StyleSheet, Alert, Platform, AppState } from "react-native";
 import AsyncStorage from "@react-native-async-storage/async-storage";
 import localforage from "localforage";
 import { Logger } from "../utils/logger";
@@ -13,19 +13,19 @@ import { LISTA_UNIVERSIDADES, getCostoUniversidad } from "../constants/Universit
 
 const storage = {
   getItem: async <T = string>(key: string): Promise<T | null> => {
-    if (Platform.OS === 'web') return localforage.getItem<T>(key);
+    if ((typeof Platform !== 'undefined' && Platform?.OS === 'web')) return localforage.getItem<T>(key);
     const val = await AsyncStorage.getItem(key);
     return (val as any) as T;
   },
   setItem: async (key: string, value: string): Promise<void> => {
-    if (Platform.OS === 'web') {
+    if ((typeof Platform !== 'undefined' && Platform?.OS === 'web')) {
       await localforage.setItem(key, value);
       return;
     }
     await AsyncStorage.setItem(key, value);
   },
   removeItem: async (key: string): Promise<void> => {
-    if (Platform.OS === 'web') {
+    if ((typeof Platform !== 'undefined' && Platform?.OS === 'web')) {
       await localforage.removeItem(key);
       return;
     }
@@ -587,12 +587,46 @@ export const FinancialProvider = ({ children }: { children: ReactNode }) => {
 
     if (hayPendientes && isOnline) {
       setSyncStatus("pending");
+      // Intentamos sincronizar automáticamente
+      forceSync().catch((err) => console.warn("Auto-sync error:", err));
     } else if (hayPendientes && !isOnline) {
       setSyncStatus("pending");
     } else {
       setSyncStatus("synced");
     }
   }, [listaClientes, isOnline]);
+
+  // AppState Listener para sincronizar al volver del background
+  useEffect(() => {
+    const subscription = AppState.addEventListener("change", (nextAppState) => {
+      if (nextAppState === "active" && isOnline) {
+        const hayPendientes = listaClientes.some((c) => !c.sincronizado);
+        if (hayPendientes) {
+          setSyncStatus("pending");
+          forceSync().catch((err) => console.warn("Background auto-sync error:", err));
+        }
+      }
+    });
+
+    return () => {
+      subscription.remove();
+    };
+  }, [listaClientes, isOnline]);
+
+  // AUTO SYNC AL INICIAR LA APP (Cold Boot)
+  useEffect(() => {
+    if (isInitialized && isOnline) {
+      const hayPendientes = listaClientes.some((c) => !c.sincronizado);
+      if (hayPendientes) {
+        setSyncStatus("pending");
+        // Pequeño retraso para evitar sobrecargar el arranque
+        const timer = setTimeout(() => {
+          forceSync().catch((err) => console.warn("Init auto-sync error:", err));
+        }, 3000);
+        return () => clearTimeout(timer);
+      }
+    }
+  }, [isInitialized]);
 
   // --- HELPER: Convierte fecha DD/MM/AAAA a edad (Num) ---
   const calculateAgeNumber = (dateString: string): string => {
@@ -842,7 +876,6 @@ export const FinancialProvider = ({ children }: { children: ReactNode }) => {
       decision_maker_name: data.cita?.nombreDecisionMaker || "",
     },
     referrals: (data.referidos || []).map((r: any) => ({
-      id: r.id || "",
       name: r.nombre || "",
       age: parseNum(r.edad),
       marital_status: r.estadoCivil || "",
@@ -1280,6 +1313,9 @@ export const FinancialProvider = ({ children }: { children: ReactNode }) => {
             const sBody = JSON.stringify(singlePayload, (_k, v) =>
               typeof v === 'string' ? v.replace(/[\x00-\x08\x0B\x0C\x0E-\x1F\x7F]/g, '') : v
             );
+
+            // Añadimos un pequeño delay para no disparar el límite de velocidad (429 Too Many Requests) del servidor
+            await new Promise(resolve => setTimeout(resolve, 1500));
 
             const sRes = await fetch(targetUrl, {
               method: 'POST',
