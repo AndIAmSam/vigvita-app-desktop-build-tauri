@@ -4,6 +4,7 @@ import React, {
   useContext,
   ReactNode,
   useEffect,
+  useRef,
 } from "react";
 import { Modal, View, Text, TouchableOpacity, StyleSheet, Alert, Platform, AppState } from "react-native";
 import AsyncStorage from "@react-native-async-storage/async-storage";
@@ -463,6 +464,7 @@ export const FinancialProvider = ({ children }: { children: ReactNode }) => {
   const [currentServerId, setCurrentServerId] = useState<string | null>(null);
   const [listaNube, setListaNube] = useState<ClienteGuardado[]>([]);
   const [isFetchingCloud, setIsFetchingCloud] = useState(false);
+  const isSyncingRef = useRef(false);
 
   // Estados Data
   const [perfil, setPerfil] = useState<PerfilData>(initialPerfil);
@@ -581,20 +583,33 @@ export const FinancialProvider = ({ children }: { children: ReactNode }) => {
   }, []);
 
   // AUTO SYNC TRIGGER
+  // ACTUALIZACIÓN DE ESTADO DE UI (Sin trigger de red para evitar loops)
   useEffect(() => {
     // Buscamos si hay algo SIN sincronizar
     const hayPendientes = listaClientes.some((c) => !c.sincronizado);
-
-    if (hayPendientes && isOnline) {
-      setSyncStatus("pending");
-      // Intentamos sincronizar automáticamente
-      forceSync().catch((err) => console.warn("Auto-sync error:", err));
-    } else if (hayPendientes && !isOnline) {
+    if (hayPendientes) {
       setSyncStatus("pending");
     } else {
       setSyncStatus("synced");
     }
   }, [listaClientes, isOnline]);
+
+  // AUTO SYNC SOLO AL RECUPERAR CONEXIÓN
+  // (Previene loops infinitos si la red rechaza los prospectos repetidamente)
+  useEffect(() => {
+    if (isOnline) {
+      setListaClientes((currentList) => {
+        const hayPendientes = currentList.some((c) => !c.sincronizado);
+        if (hayPendientes) {
+          // Pequeño retraso para salir del ciclo de renderizado de React
+          setTimeout(() => {
+            forceSync(currentList).catch((err) => console.warn("Network auto-sync error:", err));
+          }, 1500);
+        }
+        return currentList;
+      });
+    }
+  }, [isOnline]);
 
   // AppState Listener para sincronizar al volver del background
   useEffect(() => {
@@ -1058,6 +1073,11 @@ export const FinancialProvider = ({ children }: { children: ReactNode }) => {
 
   // --- SYNC COMO JSON PURO ---
   const forceSync = async (overrideList?: ClienteGuardado[], skipCloudRefresh?: boolean): Promise<string> => {
+    if (isSyncingRef.current) {
+      console.warn("Sincronización ya en curso. Ignorando petición concurrente.");
+      return "Sincronización ya en curso.";
+    }
+
     // DEV MODE BYPASS: Evitar auto-sincronización y logouts forzados por token falso
     if (advisor?.id === "DEV-MODE") {
       setSyncStatus("synced");
@@ -1075,6 +1095,7 @@ export const FinancialProvider = ({ children }: { children: ReactNode }) => {
       return "ERROR: No hay internet. Los datos siguen locales.";
     }
 
+    isSyncingRef.current = true;
     setSyncStatus("syncing");
 
     // Usa la lista forzada (si se acaba de guardar algo) o el state actual
@@ -1086,6 +1107,7 @@ export const FinancialProvider = ({ children }: { children: ReactNode }) => {
     // Si no hay nada que subir, terminamos
     if (clientesPendientes.length === 0) {
       setSyncStatus("synced");
+      isSyncingRef.current = false;
       return "✅ Todo está al día. No hay datos pendientes de envío.";
     }
 
@@ -1191,6 +1213,11 @@ export const FinancialProvider = ({ children }: { children: ReactNode }) => {
           }
 
           try {
+            // Retraso de 350ms entre cada GET para no disparar el Rate Limit (429) del servidor en validaciones masivas
+            if (i > 0) {
+              await new Promise(resolve => setTimeout(resolve, 350));
+            }
+
             const checkRes = await fetch(`${API_BASE_URL}/api/profiles/${serverIdAsignado}`, {
               method: "GET",
               headers: { "Authorization": `Bearer ${advisor?.token || ''}` }
@@ -1382,6 +1409,7 @@ export const FinancialProvider = ({ children }: { children: ReactNode }) => {
           if (!skipCloudRefresh) setTimeout(() => fetchSincronizadosNube(), 500);
         }
 
+        isSyncingRef.current = false;
         return syncedIds.length > 0 ? "Sincronización parcial completada." : "ERROR: Todos los prospectos fallaron individualmente.";
 
       } else {
@@ -1396,6 +1424,7 @@ export const FinancialProvider = ({ children }: { children: ReactNode }) => {
           body: errText,
           payloadEnviado: payload
         });
+        isSyncingRef.current = false;
         return "ERROR: Fallo al crear perfiles en el servidor.";
       }
     } catch (error) {
@@ -1403,6 +1432,7 @@ export const FinancialProvider = ({ children }: { children: ReactNode }) => {
       setSyncStatus("pending");
       showAlert("Error de red al intentar sincronizar.");
       Logger.error(`Excepción durante la sincronización`, error);
+      isSyncingRef.current = false;
       return "ERROR: Excepción durante la sincronización.";
     }
   };
