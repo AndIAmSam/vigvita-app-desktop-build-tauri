@@ -1330,6 +1330,7 @@ export const FinancialProvider = ({ children }: { children: ReactNode }) => {
         }
 
         Logger.info(`Sincronización exitosa`, { prospectosSincronizados: clientesPendientes.length });
+        isSyncingRef.current = false;
         return "Sincronización exitosa con el servidor.";
       } else if (response.status === 400 && clientesPendientes.length > 1) {
         // ── RESCUE MODE ──────────────────────────────────────────────────
