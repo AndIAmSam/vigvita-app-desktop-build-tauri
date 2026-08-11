@@ -1200,17 +1200,33 @@ export const FinancialProvider = ({ children }: { children: ReactNode }) => {
 
         // --- NUEVO: READ-AFTER-WRITE VALIDATION ---
         const failedSyncIds = new Set<string>();
+        const assignedIdsMap = new Map<string, string>();
+        let uuidIndex = 0;
 
         // Descargar y validar lo que el servidor acaba de guardar
         for (let i = 0; i < clientesPendientes.length; i++) {
           const pend = clientesPendientes[i];
-          const serverIdAsignado = pend.serverId || returnedUuids[i];
+          let serverIdAsignado = pend.serverId;
+
+          // Lógica robusta de asignación de UUIDs
+          if (returnedUuids.length === clientesPendientes.length) {
+            // Mapeo directo 1:1 si el servidor devolvió la misma cantidad
+            serverIdAsignado = serverIdAsignado || returnedUuids[i];
+          } else {
+            // Si devolvió menos, consumimos los UUIDs solo para los prospectos nuevos
+            if (!serverIdAsignado && returnedUuids[uuidIndex]) {
+              serverIdAsignado = returnedUuids[uuidIndex];
+              uuidIndex++;
+            }
+          }
 
           if (!serverIdAsignado) {
             console.warn(`[Read-After-Write] Prospecto ${pend.nombre} no obtuvo un UUID. Considerado fallido.`);
             failedSyncIds.add(pend.id);
             continue;
           }
+
+          assignedIdsMap.set(pend.id, serverIdAsignado);
 
           try {
             // Retraso de 350ms entre cada GET para no disparar el Rate Limit (429) del servidor en validaciones masivas
@@ -1240,12 +1256,12 @@ export const FinancialProvider = ({ children }: { children: ReactNode }) => {
               const localPiramide = pend.data?.piramideLevels?.length || 0;
               const serverPiramide = Array.isArray(parsedData.priority_levels) ? parsedData.priority_levels.length : 0;
               
-              // Comparar longitud de referidos
-              const localReferidos = pend.data?.referidos?.length || 0;
+              // Comparar longitud de referidos (ignorando referidos completamente vacíos que el servidor descarta)
+              const localReferidos = (pend.data?.referidos || []).filter((r: any) => r.nombre || r.telefono || r.notas).length;
               const serverReferidos = (fullProfile.referrals || fullProfile.referidos || []).length;
 
-              // Comparar longitud de hijos
-              const localHijos = pend.data?.hijos?.length || 0;
+              // Comparar longitud de hijos (ignorando vacíos)
+              const localHijos = (pend.data?.hijos || []).filter((h: any) => h.nombre || h.universidad).length;
               const serverHijos = Array.isArray(parsedData.children) ? parsedData.children.length : 0;
 
               if (localPiramide !== serverPiramide || localReferidos !== serverReferidos || localHijos !== serverHijos) {
@@ -1276,15 +1292,24 @@ export const FinancialProvider = ({ children }: { children: ReactNode }) => {
             }
           });
 
-          const listaActualizada = prev.filter((c) => {
-            const syncIndex = clientesPendientes.findIndex(pend => pend.id === c.id);
-            // Si el cliente NO estaba en pendientes, se queda.
-            if (syncIndex === -1) return true;
-            // Si estaba en pendientes PERO falló la validación Read-After-Write, se queda protegido.
-            if (failedSyncIds.has(c.id)) return true;
-            // Si estaba en pendientes y superó la validación, lo REMOVEMOS de storage (es seguro).
-            return false;
-          });
+          const listaActualizada = prev
+            .filter((c) => {
+              const syncIndex = clientesPendientes.findIndex(pend => pend.id === c.id);
+              // Si el cliente NO estaba en pendientes, se queda.
+              if (syncIndex === -1) return true;
+              // Si estaba en pendientes PERO falló la validación Read-After-Write, se queda protegido.
+              if (failedSyncIds.has(c.id)) return true;
+              // Si estaba en pendientes y superó la validación, lo REMOVEMOS de storage (es seguro).
+              return false;
+            })
+            .map((c) => {
+              if (failedSyncIds.has(c.id) && assignedIdsMap.has(c.id)) {
+                // BUGFIX CRÍTICO: Si falló la validación pero se creó en el servidor, DEBEMOS
+                // guardarle el UUID asigado. Así, el próximo reintento hará un UPDATE y no un CREATE (Duplicados)
+                return { ...c, serverId: assignedIdsMap.get(c.id) };
+              }
+              return c;
+            });
 
           // Persistimos dentro del updater de estado para asegurar la fuente de la verdad
           storage.setItem("clientes_db", JSON.stringify(listaActualizada)).catch(console.error);

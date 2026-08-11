@@ -137,7 +137,7 @@ export default function ConfiguracionScreen() {
                             </View>
                             <View style={styles.optionTextContainer}>
                                 <Text style={styles.optionTitle}>Notas de versión</Text>
-                                <Text style={styles.optionDesc}>Descubre las novedades de VigADN v1.3.7</Text>
+                                <Text style={styles.optionDesc}>Descubre las novedades de VigADN v1.3.8</Text>
                             </View>
                             <FontAwesome name="chevron-right" size={14} color={COLORS.textoGris} />
                         </TouchableOpacity>
@@ -192,7 +192,7 @@ export default function ConfiguracionScreen() {
                     </Animated.View>
 
                     <View style={{ height: 40 }} />
-                    <Text style={{ textAlign: 'center', fontSize: 10, color: '#d1d5db', letterSpacing: 1 }}>VIGADN v1.3.7</Text>
+                    <Text style={{ textAlign: 'center', fontSize: 10, color: '#d1d5db', letterSpacing: 1 }}>VIGADN v1.3.8</Text>
                     <View style={{ height: 80 }} />
                 </ScrollView>
 
@@ -205,7 +205,7 @@ export default function ConfiguracionScreen() {
                                 <View style={{ flex: 1 }}>
                                     <Text style={styles.modalSubtitleCierre}>Notas de Versión</Text>
                                     <Text style={styles.modalTitleCierre} numberOfLines={1}>Novedades de VigADN</Text>
-                                    <Text style={styles.modalClientDate}>Versión 1.3.7</Text>
+                                    <Text style={styles.modalClientDate}>Versión 1.3.8</Text>
                                 </View>
                                 <TouchableOpacity style={styles.closeBtnIcon} onPress={() => setModalNotasVisible(false)}>
                                     <FontAwesome name="times" size={16} color={COLORS.textoGris} />
@@ -213,7 +213,7 @@ export default function ConfiguracionScreen() {
                             </View>
 
                             <ScrollView style={{ width: '100%', maxHeight: 350, marginBottom: 10, paddingRight: 5 }} showsVerticalScrollIndicator={true}>
-                                <Text style={{ fontSize: 15, fontWeight: 'bold', color: COLORS.azul1, marginTop: 5, marginBottom: 8 }}>Generales (v1.3.7):</Text>
+                                <Text style={{ fontSize: 15, fontWeight: 'bold', color: COLORS.azul1, marginTop: 5, marginBottom: 8 }}>Generales (v1.3.8):</Text>
                                 <Text style={{ fontSize: 14, color: COLORS.textoGris, lineHeight: 22, textAlign: 'left', marginBottom: 15 }}>
                                     • <Text style={{ fontWeight: 'bold' }}>Correcciones menores:</Text> Mejoras de estabilidad y rendimiento interno.
                                 </Text>
