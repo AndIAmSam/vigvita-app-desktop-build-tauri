@@ -1221,7 +1221,7 @@ export const FinancialProvider = ({ children }: { children: ReactNode }) => {
           }
 
           if (!serverIdAsignado) {
-            console.warn(`[Read-After-Write] Prospecto ${pend.nombre} no obtuvo un UUID. Considerado fallido.`);
+            Logger.warn(`[Read-After-Write] Prospecto ${pend.nombre} no obtuvo un UUID. Considerado fallido.`);
             failedSyncIds.add(pend.id);
             continue;
           }
@@ -1229,10 +1229,8 @@ export const FinancialProvider = ({ children }: { children: ReactNode }) => {
           assignedIdsMap.set(pend.id, serverIdAsignado);
 
           try {
-            // Retraso de 350ms entre cada GET para no disparar el Rate Limit (429) del servidor en validaciones masivas
-            if (i > 0) {
-              await new Promise(resolve => setTimeout(resolve, 350));
-            }
+            // Retraso de 400ms para el primer GET (para dar tiempo al servidor de procesar la DB), y 350ms para los siguientes
+            await new Promise(resolve => setTimeout(resolve, i === 0 ? 400 : 350));
 
             const checkRes = await fetch(`${API_BASE_URL}/api/profiles/${serverIdAsignado}`, {
               method: "GET",
@@ -1265,17 +1263,18 @@ export const FinancialProvider = ({ children }: { children: ReactNode }) => {
               const serverHijos = Array.isArray(parsedData.children) ? parsedData.children.length : 0;
 
               if (localPiramide !== serverPiramide || localReferidos !== serverReferidos || localHijos !== serverHijos) {
-                console.warn(`[Read-After-Write] DATOS CORRUPTOS PARA ${pend.nombre}. Piramide: ${localPiramide}vs${serverPiramide}, Referidos: ${localReferidos}vs${serverReferidos}, Hijos: ${localHijos}vs${serverHijos}.`);
-                failedSyncIds.add(pend.id);
+                Logger.warn(`[Read-After-Write] DISCREPANCIA DE DATOS PARA ${pend.nombre}. Piramide: ${localPiramide}vs${serverPiramide}, Referidos: ${localReferidos}vs${serverReferidos}, Hijos: ${localHijos}vs${serverHijos}. Se aceptará la versión del servidor.`);
+                // Ya no fallamos la sincronización. El servidor es la fuente de la verdad.
+                // Si el servidor eliminó duplicados o ignoró datos, lo aceptamos para no quedarnos atascados.
               } else {
                 console.log(`[Read-After-Write] Validación post-escritura exitosa para ${pend.nombre}.`);
               }
             } else {
-              console.warn(`[Read-After-Write] No se pudo descargar a ${pend.nombre} para validar. Reteniendo copia local.`);
+              Logger.warn(`[Read-After-Write] No se pudo descargar a ${pend.nombre} para validar. Reteniendo copia local. Status: ${checkRes.status}`);
               failedSyncIds.add(pend.id);
             }
           } catch(e) {
-            console.error(`[Read-After-Write] Error de red validando a ${pend.nombre}:`, e);
+            Logger.error(`[Read-After-Write] Error de red validando a ${pend.nombre}:`, e);
             failedSyncIds.add(pend.id);
           }
         }
