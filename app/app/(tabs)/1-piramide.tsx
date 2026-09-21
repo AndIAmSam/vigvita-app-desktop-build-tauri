@@ -1,4 +1,5 @@
-import React, { useEffect, useRef, useState } from "react"; // <--- AGREGAR useState
+import React, { useEffect, useRef, useState } from "react";
+import { CustomScrollView } from '../../components/CustomScrollView'; // <--- AGREGAR useState
 import {
   View,
   Text,
@@ -112,7 +113,7 @@ export default function PiramideScreen() {
         />
       </View>
 
-      <ScrollView
+      <CustomScrollView
         contentContainerStyle={styles.scrollContent}
         showsVerticalScrollIndicator={false}
       >
@@ -231,7 +232,7 @@ export default function PiramideScreen() {
         )}
 
         <View style={{ height: 60 }} />
-      </ScrollView>
+      </CustomScrollView>
     </View>
   );
 }

@@ -1,6 +1,6 @@
 import React, { useEffect, useRef, useState } from 'react';
 import { Tabs, usePathname, useRouter, useRootNavigationState } from 'expo-router';
-import { View, StyleSheet, useWindowDimensions, TouchableOpacity, Animated, Text, Image, AppState, Alert } from 'react-native';
+import { View, StyleSheet, useWindowDimensions, TouchableOpacity, Animated, Text, Image, AppState, Alert, KeyboardAvoidingView, Keyboard, Platform } from 'react-native';
 import { FontAwesome } from '@expo/vector-icons';
 import { useFinancialData } from '../../context/FinancialContext';
 
@@ -47,6 +47,25 @@ const TAB_LABELS: { [key: string]: string } = {
 function CustomTabBar({ state, descriptors, navigation }: any) {
   const { width } = useWindowDimensions();
   const { accessExpiresAt } = useFinancialData();
+  const [isKeyboardVisible, setKeyboardVisible] = useState(false);
+
+  useEffect(() => {
+    if (Platform.OS === 'web') return;
+    
+    const showSubscription = Keyboard.addListener(
+      Platform.OS === 'ios' ? 'keyboardWillShow' : 'keyboardDidShow',
+      () => setKeyboardVisible(true)
+    );
+    const hideSubscription = Keyboard.addListener(
+      Platform.OS === 'ios' ? 'keyboardWillHide' : 'keyboardDidHide',
+      () => setKeyboardVisible(false)
+    );
+    
+    return () => {
+      showSubscription.remove();
+      hideSubscription.remove();
+    };
+  }, []);
 
   const isWarningActive = accessExpiresAt && (new Date(accessExpiresAt).getTime() - Date.now() > 0);
 
@@ -78,6 +97,10 @@ function CustomTabBar({ state, descriptors, navigation }: any) {
       tension: 60
     }).start();
   }, [state.index, tabWidth]);
+
+  if (isKeyboardVisible && Platform.OS !== 'web') {
+    return null;
+  }
 
   return (
     <View style={[
@@ -263,7 +286,8 @@ export default function TabLayout() {
   return (
     <View style={{ flex: 1 }}>
       <AccessWarningBanner expiresAt={accessExpiresAt} />
-      <Tabs
+      <View style={{ flex: 1 }}>
+        <Tabs
         tabBar={props => <CustomTabBar {...props} />}
         screenOptions={{
           headerShown: false, // Ocultar header por defecto
@@ -288,6 +312,7 @@ export default function TabLayout() {
         <Tabs.Screen name="9-notas" options={{ href: null }} />
         <Tabs.Screen name="10-configuracion" options={{ href: null }} />
       </Tabs>
+      </View>
 
       {/* Indicador de estado de conexión/sincronización — SIEMPRE visible en tablero */}
       {pathname.includes('8-tablero-demo') && (() => {

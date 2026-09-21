@@ -1,4 +1,5 @@
 import React, { useEffect, useRef, useState, useMemo } from 'react';
+import { CustomScrollView } from '../../components/CustomScrollView';
 import { View, Text, ScrollView, TextInput, StyleSheet, TouchableOpacity, Alert, Platform, Animated, Dimensions, Image, Switch, Modal, Linking, ActivityIndicator } from 'react-native';
 import { FontAwesome } from '@expo/vector-icons';
 import { useRouter } from 'expo-router';
@@ -401,7 +402,7 @@ export default function TableroCopiaScreen() {
                 <View style={[styles.blob, { backgroundColor: COLORS.verde, top: '20%', right: -150 }]} />
             </View>
 
-            <ScrollView contentContainerStyle={styles.scrollContent} showsVerticalScrollIndicator={false}>
+            <CustomScrollView contentContainerStyle={styles.scrollContent} showsVerticalScrollIndicator={false}>
 
                 {/* HEADER */}
                 <Animated.View style={{ opacity: fadeAnim, transform: [{ translateY: slideAnim }], width: '100%', alignItems: 'center' }}>
@@ -628,7 +629,7 @@ export default function TableroCopiaScreen() {
                 </View>
 
                 <View style={{ height: 100 }} />
-            </ScrollView>
+            </CustomScrollView>
 
             {/* MODAL SECUENCIA ACOMPAÑAMIENTO AL GUARDAR NUEVO */}
             <Modal visible={acompSaveModalVisible} animationType="fade" transparent>
@@ -839,7 +840,7 @@ export default function TableroCopiaScreen() {
                         <Text style={{ fontSize: 13, color: COLORS.textoGris, textAlign: 'center', marginBottom: 20 }}>Elige un asesor de tu equipo para este nuevo ADN</Text>
 
                         <View style={{ width: '100%', maxHeight: 200, marginBottom: 20 }}>
-                            <ScrollView>
+                            <CustomScrollView>
                                 {equipoLider.map((miembro: any) => (
                                     <TouchableOpacity
                                         key={miembro.id}
@@ -858,7 +859,7 @@ export default function TableroCopiaScreen() {
                                         <Text style={[{ fontSize: 15, fontWeight: '600', color: COLORS.negro }, asesorSeleccionadoGlobal?.id === miembro.id && { color: '#fff' }]}>{miembro.nombre}</Text>
                                     </TouchableOpacity>
                                 ))}
-                            </ScrollView>
+                            </CustomScrollView>
                         </View>
 
                         <TouchableOpacity

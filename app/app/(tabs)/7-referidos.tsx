@@ -1,4 +1,5 @@
 import React, { useState, useRef, useEffect } from 'react';
+import { CustomScrollView } from '../../components/CustomScrollView';
 import { View, Text, ScrollView, TextInput, StyleSheet, TouchableOpacity, ActivityIndicator, Platform, Animated, Dimensions } from 'react-native';
 import { FontAwesome } from '@expo/vector-icons';
 import { useFinancialData, Referido } from '../../context/FinancialContext';
@@ -158,7 +159,7 @@ export default function ReferidosScreen() {
         <View style={[styles.blob, { backgroundColor: COLORS.azul1, bottom: -50, right: -100 }]} />
       </View>
 
-      <ScrollView contentContainerStyle={styles.scrollContent} showsVerticalScrollIndicator={false}>
+      <CustomScrollView contentContainerStyle={styles.scrollContent} showsVerticalScrollIndicator={false}>
 
         {/* HEADER */}
         <Animated.View style={{ opacity: fadeAnim, transform: [{ translateY: slideAnim }] }}>
@@ -185,7 +186,7 @@ export default function ReferidosScreen() {
             </View>
 
             {/* SCROLL HORIZONTAL PARA TABLA */}
-            <ScrollView
+            <CustomScrollView
               horizontal
               showsHorizontalScrollIndicator={true}
               contentContainerStyle={{ flexGrow: 1 }} // CLAVE: Permite que crezca si sobra espacio
@@ -299,7 +300,7 @@ export default function ReferidosScreen() {
                   ))
                 )}
               </View>
-            </ScrollView>
+            </CustomScrollView>
 
             {/* BOTONES DE ACTIVACIÓN DE ENTORNOS (ABAJO Y CENTRADOS) */}
             <View style={styles.envButtonsContainer}>
@@ -354,7 +355,7 @@ export default function ReferidosScreen() {
 
         </View>
         <View style={{ height: 100 }} />
-      </ScrollView>
+      </CustomScrollView>
     </View>
   );
 }

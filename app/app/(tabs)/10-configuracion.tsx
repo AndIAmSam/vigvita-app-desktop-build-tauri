@@ -1,4 +1,5 @@
 import React, { useState, useEffect, useRef } from 'react';
+import { CustomScrollView } from '../../components/CustomScrollView';
 import { View, Text, ScrollView, StyleSheet, TouchableOpacity, Modal, Linking, Platform, SafeAreaView, Animated, Alert, TextInput } from 'react-native';
 import { FontAwesome } from '@expo/vector-icons';
 import { useRouter } from 'expo-router';
@@ -103,7 +104,7 @@ export default function ConfiguracionScreen() {
                     <View style={[styles.blob, { backgroundColor: COLORS.azul2, bottom: -100, left: '10%' }]} />
                 </View>
 
-                <ScrollView contentContainerStyle={styles.scrollContent} showsVerticalScrollIndicator={false}>
+                <CustomScrollView contentContainerStyle={styles.scrollContent} showsVerticalScrollIndicator={false}>
 
                     {/* --- HEADER --- */}
                     <Animated.View style={{ opacity: fadeAnim, transform: [{ translateY: slideAnim }] }}>
@@ -194,7 +195,7 @@ export default function ConfiguracionScreen() {
                     <View style={{ height: 40 }} />
                     <Text style={{ textAlign: 'center', fontSize: 10, color: '#d1d5db', letterSpacing: 1 }}>VIGADN v1.3.9</Text>
                     <View style={{ height: 80 }} />
-                </ScrollView>
+                </CustomScrollView>
 
                 {/* --- MODAL NOTAS DE VERSIÓN (Migrado desde Tablero) --- */}
                 <Modal visible={modalNotasVisible} animationType="fade" transparent>
@@ -212,12 +213,12 @@ export default function ConfiguracionScreen() {
                                 </TouchableOpacity>
                             </View>
 
-                            <ScrollView style={{ width: '100%', maxHeight: 350, marginBottom: 10, paddingRight: 5 }} showsVerticalScrollIndicator={true}>
+                            <CustomScrollView style={{ width: '100%', maxHeight: 350, marginBottom: 10, paddingRight: 5 }} showsVerticalScrollIndicator={true}>
                                 <Text style={{ fontSize: 15, fontWeight: 'bold', color: COLORS.azul1, marginTop: 5, marginBottom: 8 }}>Generales (v1.3.9):</Text>
                                 <Text style={{ fontSize: 14, color: COLORS.textoGris, lineHeight: 22, textAlign: 'left', marginBottom: 15 }}>
                                     • <Text style={{ fontWeight: 'bold' }}>Correcciones menores:</Text> Mejoras de estabilidad y rendimiento interno.
                                 </Text>
-                            </ScrollView>
+                            </CustomScrollView>
 
                             <TouchableOpacity onPress={() => Linking.openURL('https://panel.vigvita.com.mx/vigadn/release-notes')} style={{ marginBottom: 20, paddingVertical: 5 }}>
                                 <Text style={{ fontSize: 14, color: COLORS.azul2, textAlign: 'center', textDecorationLine: 'underline', fontWeight: 'bold' }}>

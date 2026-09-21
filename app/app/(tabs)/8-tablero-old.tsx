@@ -1,4 +1,5 @@
 import React, { useEffect, useRef, useState, useMemo } from 'react';
+import { CustomScrollView } from '../../components/CustomScrollView';
 import { View, Text, ScrollView, TextInput, StyleSheet, TouchableOpacity, Alert, Platform, Animated, Dimensions, Image, Switch, Modal } from 'react-native';
 import { FontAwesome } from '@expo/vector-icons';
 import { useRouter } from 'expo-router';
@@ -148,7 +149,7 @@ export default function TableroScreen() {
                 <View style={[styles.blob, { backgroundColor: COLORS.verde, top: '20%', right: -150 }]} />
             </View>
 
-            <ScrollView contentContainerStyle={styles.scrollContent} showsVerticalScrollIndicator={false}>
+            <CustomScrollView contentContainerStyle={styles.scrollContent} showsVerticalScrollIndicator={false}>
 
                 {/* HEADER + SYNC BAR */}
                 <Animated.View style={{ opacity: fadeAnim, transform: [{ translateY: slideAnim }], width: '100%', alignItems: 'center' }}>
@@ -259,16 +260,16 @@ export default function TableroScreen() {
                 </View>
 
                 <View style={{ height: 100 }} />
-            </ScrollView>
+            </CustomScrollView>
 
             {/* MODAL DEBUG SYNC */}
             <Modal visible={showJsonModal} animationType="slide" transparent>
                 <View style={styles.modalOverlay}>
                     <View style={styles.modalContent}>
                         <Text style={{ fontWeight: 'bold', marginBottom: 10 }}>Simulación POST (JSON)</Text>
-                        <ScrollView style={{ maxHeight: 300, backgroundColor: '#f0f0f0', padding: 10, borderRadius: 8 }}>
+                        <CustomScrollView style={{ maxHeight: 300, backgroundColor: '#f0f0f0', padding: 10, borderRadius: 8 }}>
                             <Text style={{ fontSize: 11, fontFamily: Platform.OS === 'ios' ? 'Courier' : 'monospace' }}>{payloadPreview}</Text>
-                        </ScrollView>
+                        </CustomScrollView>
                         <TouchableOpacity style={styles.closeBtn} onPress={() => setShowJsonModal(false)}><Text style={{ color: '#fff', fontWeight: 'bold' }}>Cerrar</Text></TouchableOpacity>
                     </View>
                 </View>

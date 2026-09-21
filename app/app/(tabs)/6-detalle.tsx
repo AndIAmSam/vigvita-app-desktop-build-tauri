@@ -1,4 +1,5 @@
 import React, { useEffect, useRef } from 'react';
+import { CustomScrollView } from '../../components/CustomScrollView';
 import { View, Text, ScrollView, TextInput, StyleSheet, Platform, Animated, Dimensions } from 'react-native';
 import { FontAwesome } from '@expo/vector-icons';
 import { useFinancialData } from '../../context/FinancialContext';
@@ -90,7 +91,7 @@ export default function DetalleScreen() {
         <View style={[styles.blob, { backgroundColor: COLORS.verde, bottom: -100, left: '10%' }]} />
       </View>
 
-      <ScrollView contentContainerStyle={styles.scrollContent} showsVerticalScrollIndicator={false}>
+      <CustomScrollView contentContainerStyle={styles.scrollContent} showsVerticalScrollIndicator={false}>
 
         {/* HEADER */}
         <Animated.View style={{ opacity: fadeAnim, transform: [{ translateY: slideAnim }] }}>
@@ -211,7 +212,7 @@ export default function DetalleScreen() {
 
         </View>
         <View style={{ height: 100 }} />
-      </ScrollView>
+      </CustomScrollView>
     </View>
   );
 }

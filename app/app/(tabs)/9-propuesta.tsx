@@ -1,6 +1,8 @@
 import React, { useEffect, useRef } from 'react';
+import { CustomScrollView } from '../../components/CustomScrollView';
 import { View, Text, ScrollView, TextInput, StyleSheet, Platform, Animated, Dimensions, Switch, TouchableOpacity } from 'react-native';
 import { Picker } from '@react-native-picker/picker';
+import { CustomPicker } from '../../components/CustomPicker';
 import { FontAwesome } from '@expo/vector-icons';
 import { useFinancialData } from '../../context/FinancialContext';
 
@@ -73,7 +75,7 @@ export default function PlanScreen() {
         <View style={[styles.blob, { backgroundColor: COLORS.verde, bottom: -100, right: -100 }]} />
       </View>
 
-      <ScrollView contentContainerStyle={styles.scrollContent} showsVerticalScrollIndicator={false}>
+      <CustomScrollView contentContainerStyle={styles.scrollContent} showsVerticalScrollIndicator={false}>
 
         {/* HEADER */}
         <Animated.View style={{ opacity: fadeAnim, transform: [{ translateY: slideAnim }] }}>
@@ -141,21 +143,27 @@ export default function PlanScreen() {
             <View style={styles.calendarRow}>
               <View style={styles.calendarItemWrapper}>
                 <Text style={styles.calendarLabel}>DÍA</Text>
-                <View style={styles.calendarPickerContainer}>
-                  <Picker selectedValue={cita.dia} onValueChange={(v) => updateCita('dia', v)} style={styles.calendarPicker as any}>
-                    <Picker.Item label="Día" value="" color={COLORS.textoGris} />
-                    {DIAS.map(d => <Picker.Item key={d} label={d} value={d} color={COLORS.negro} />)}
-                  </Picker>
-                </View>
+                <CustomPicker 
+                  selectedValue={cita.dia} 
+                  onValueChange={(v) => updateCita('dia', v)} 
+                  placeholder="Día"
+                  items={[
+                    { label: "Día", value: "" },
+                    ...DIAS.map(d => ({ label: d, value: d }))
+                  ]}
+                />
               </View>
               <View style={[styles.calendarItemWrapper, { flex: 1.5 }]}>
                 <Text style={styles.calendarLabel}>MES</Text>
-                <View style={styles.calendarPickerContainer}>
-                  <Picker selectedValue={cita.mes} onValueChange={(v) => updateCita('mes', v)} style={styles.calendarPicker as any}>
-                    <Picker.Item label="Mes" value="" color={COLORS.textoGris} />
-                    {MESES.map(m => <Picker.Item key={m} label={m} value={m} color={COLORS.negro} />)}
-                  </Picker>
-                </View>
+                <CustomPicker 
+                  selectedValue={cita.mes} 
+                  onValueChange={(v) => updateCita('mes', v)} 
+                  placeholder="Mes"
+                  items={[
+                    { label: "Mes", value: "" },
+                    ...MESES.map(m => ({ label: m, value: m }))
+                  ]}
+                />
               </View>
               <View style={[styles.calendarItemWrapper, { flex: 1.5 }]}>
                 <Text style={styles.calendarLabel}>HORA</Text>
@@ -234,7 +242,7 @@ export default function PlanScreen() {
 
         </View>
         <View style={{ height: 100 }} />
-      </ScrollView>
+      </CustomScrollView>
     </View>
   );
 }

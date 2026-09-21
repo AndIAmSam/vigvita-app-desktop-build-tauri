@@ -1,6 +1,8 @@
 import React, { useEffect, useState, useRef } from 'react';
+import { CustomScrollView } from '../../components/CustomScrollView';
 import { View, Text, ScrollView, TextInput, StyleSheet, Platform, TouchableOpacity, Animated, Dimensions } from 'react-native';
 import { Picker } from '@react-native-picker/picker';
+import { CustomPicker } from '../../components/CustomPicker';
 import { FontAwesome } from '@expo/vector-icons';
 import { LISTA_UNIVERSIDADES, getCostoUniversidad } from '../../constants/UniversityData';
 import { useFinancialData } from '../../context/FinancialContext';
@@ -127,7 +129,7 @@ export default function EducacionScreen() {
         <View style={[styles.blob, { backgroundColor: COLORS.azul2, bottom: -50, left: '10%' }]} />
       </View>
 
-      <ScrollView contentContainerStyle={styles.scrollContent} showsVerticalScrollIndicator={false}>
+      <CustomScrollView contentContainerStyle={styles.scrollContent} showsVerticalScrollIndicator={false}>
 
         {/* HEADER (Animación Propia) */}
         <Animated.View style={{ opacity: headerOpacity, transform: [{ translateY: headerSlide }] }}>
@@ -192,7 +194,7 @@ export default function EducacionScreen() {
         )}
 
         <View style={{ height: 100 }} />
-      </ScrollView>
+      </CustomScrollView>
     </View>
   );
 }
@@ -267,18 +269,12 @@ const CardHijo = ({ hijo, index, onUpdate, onRemove, formatMoney }: any) => {
 
         <View style={{ marginTop: 20 }}>
           <Text style={styles.label}>Universidad Destino</Text>
-          <View style={styles.pickerContainer}>
-            <Picker
-              selectedValue={hijo.universidad}
-              onValueChange={(v) => onUpdate(index, 'universidad', v)}
-              style={styles.picker as any}
-              itemStyle={{ fontSize: 14 }}
-            >
-              {LISTA_UNIVERSIDADES.map((uni) => (
-                <Picker.Item key={uni} label={uni} value={uni} color={COLORS.negro} />
-              ))}
-            </Picker>
-          </View>
+          <CustomPicker
+            selectedValue={hijo.universidad}
+            onValueChange={(v) => onUpdate(index, 'universidad', v)}
+            placeholder="Selecciona Universidad"
+            items={LISTA_UNIVERSIDADES.map(uni => ({ label: uni, value: uni }))}
+          />
         </View>
       </View>
 

@@ -1,4 +1,5 @@
 import React, { useEffect, useRef } from "react";
+import { CustomScrollView } from '../../components/CustomScrollView';
 import {
   View,
   Text,
@@ -114,7 +115,7 @@ export default function GeneralScreen() {
         />
       </View>
 
-      <ScrollView
+      <CustomScrollView
         contentContainerStyle={styles.scrollContent}
         showsVerticalScrollIndicator={false}
       >
@@ -363,7 +364,7 @@ export default function GeneralScreen() {
           </AnimatedCard>
         </View>
         <View style={{ height: 100 }} />
-      </ScrollView>
+      </CustomScrollView>
     </View>
   );
 }

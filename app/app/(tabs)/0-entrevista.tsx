@@ -1,4 +1,5 @@
 import React, { useState, useEffect, useRef } from "react";
+import { CustomScrollView } from '../../components/CustomScrollView';
 import {
   View,
   Text,
@@ -13,6 +14,7 @@ import {
   KeyboardTypeOptions,
 } from "react-native";
 import { Picker } from "@react-native-picker/picker";
+import { CustomPicker } from "../../components/CustomPicker";
 import { FontAwesome } from "@expo/vector-icons";
 import { useFinancialData } from "../../context/FinancialContext";
 
@@ -114,7 +116,7 @@ export default function EntrevistaScreen() {
         />
       </View>
 
-      <ScrollView
+      <CustomScrollView
         contentContainerStyle={styles.scrollContent}
         showsVerticalScrollIndicator={false}
       >
@@ -240,46 +242,19 @@ export default function EntrevistaScreen() {
             <View style={styles.rowInputs}>
               <View style={{ flex: 1, marginRight: 10 }}>
                 <Text style={styles.label}>Estado Civil</Text>
-                <View style={styles.pickerContainer}>
-                  <Picker
-                    selectedValue={perfil.estadoCivil}
-                    onValueChange={(itemValue) =>
-                      updatePerfil("estadoCivil", itemValue)
-                    }
-                    style={styles.picker as any}
-                  >
-                    <Picker.Item
-                      label="Selecciona..."
-                      value=""
-                      color={COLORS.textoGris}
-                    />
-                    <Picker.Item
-                      label="Soltero(a)"
-                      value="Soltero(a)"
-                      color={COLORS.negro}
-                    />
-                    <Picker.Item
-                      label="Casado(a)"
-                      value="Casado(a)"
-                      color={COLORS.negro}
-                    />
-                    <Picker.Item
-                      label="Unión Libre"
-                      value="Unión Libre"
-                      color={COLORS.negro}
-                    />
-                    <Picker.Item
-                      label="Divorciado(a)"
-                      value="Divorciado(a)"
-                      color={COLORS.negro}
-                    />
-                    <Picker.Item
-                      label="Viudo(a)"
-                      value="Viudo(a)"
-                      color={COLORS.negro}
-                    />
-                  </Picker>
-                </View>
+                <CustomPicker
+                  selectedValue={perfil.estadoCivil}
+                  onValueChange={(itemValue) => updatePerfil("estadoCivil", itemValue)}
+                  placeholder="Selecciona..."
+                  items={[
+                    { label: "Selecciona...", value: "" },
+                    { label: "Soltero(a)", value: "Soltero(a)" },
+                    { label: "Casado(a)", value: "Casado(a)" },
+                    { label: "Unión Libre", value: "Unión Libre" },
+                    { label: "Divorciado(a)", value: "Divorciado(a)" },
+                    { label: "Viudo(a)", value: "Viudo(a)" }
+                  ]}
+                />
               </View>
             </View>
 
@@ -477,28 +452,26 @@ export default function EntrevistaScreen() {
                   <View style={styles.depRowBottom}>
                     <View style={{ flex: 2, marginRight: 10 }}>
                       <Text style={styles.labelMini}>Parentesco</Text>
-                      <View style={[styles.inputDep, { paddingVertical: 0, paddingHorizontal: 0, justifyContent: "center", overflow: "hidden" }]}>
-                        <Picker
-                          selectedValue={dep.parentesco}
-                          onValueChange={(itemValue) =>
-                            updateDependiente(dep.id, "parentesco", itemValue)
-                          }
-                          style={styles.picker as any}
-                        >
-                          <Picker.Item label="Selecciona..." value="" color="#9ca3af" />
-                          <Picker.Item label="Hijo(a)" value="Hijo(a)" color={COLORS.negro} />
-                          <Picker.Item label="Padre" value="Padre" color={COLORS.negro} />
-                          <Picker.Item label="Madre" value="Madre" color={COLORS.negro} />
-                          <Picker.Item label="Esposo(a)" value="Esposo(a)" color={COLORS.negro} />
-                          <Picker.Item label="Hermano(a)" value="Hermano(a)" color={COLORS.negro} />
-                          <Picker.Item label="Sobrino(a)" value="Sobrino(a)" color={COLORS.negro} />
-                          <Picker.Item label="Nieto(a)" value="Nieto(a)" color={COLORS.negro} />
-                          <Picker.Item label="Abuelo(a)" value="Abuelo(a)" color={COLORS.negro} />
-                          <Picker.Item label="Tío(a)" value="Tío(a)" color={COLORS.negro} />
-                          <Picker.Item label="Primo(a)" value="Primo(a)" color={COLORS.negro} />
-                          <Picker.Item label="Otro" value="Otro" color={COLORS.negro} />
-                        </Picker>
-                      </View>
+                      <CustomPicker
+                        selectedValue={dep.parentesco}
+                        onValueChange={(itemValue) => updateDependiente(dep.id, "parentesco", itemValue)}
+                        placeholder="Selecciona..."
+                        containerStyle={[styles.inputDep, { paddingVertical: 0, paddingHorizontal: 0, justifyContent: "center" }]}
+                        items={[
+                          { label: "Selecciona...", value: "" },
+                          { label: "Hijo(a)", value: "Hijo(a)" },
+                          { label: "Padre", value: "Padre" },
+                          { label: "Madre", value: "Madre" },
+                          { label: "Esposo(a)", value: "Esposo(a)" },
+                          { label: "Hermano(a)", value: "Hermano(a)" },
+                          { label: "Sobrino(a)", value: "Sobrino(a)" },
+                          { label: "Nieto(a)", value: "Nieto(a)" },
+                          { label: "Abuelo(a)", value: "Abuelo(a)" },
+                          { label: "Tío(a)", value: "Tío(a)" },
+                          { label: "Primo(a)", value: "Primo(a)" },
+                          { label: "Otro", value: "Otro" }
+                        ]}
+                      />
                     </View>
                     <View style={{ flex: 1 }}>
                       <Text style={styles.labelMini}>Edad</Text>
@@ -542,7 +515,7 @@ export default function EntrevistaScreen() {
         </Animated.View>
 
         <View style={{ height: 100 }} />
-      </ScrollView>
+      </CustomScrollView>
     </View>
   );
 }

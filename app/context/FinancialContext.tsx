@@ -66,6 +66,7 @@ export interface Hijo {
   yearsFaltantes: number;
   costoProyectado: number;
   ahorroAnual: number;
+  linked?: boolean;
 }
 
 export interface JubilacionData {
@@ -685,6 +686,7 @@ export const FinancialProvider = ({ children }: { children: ReactNode }) => {
       let changed = false;
       let newHijos = [...prevHijos];
       const currentYear = new Date().getFullYear();
+      const usedFallbackIndices = new Set<number>();
 
       const hijosMap = new Map();
       newHijos.forEach((h, idx) => hijosMap.set(h.id, { h, idx }));
@@ -722,7 +724,24 @@ export const FinancialProvider = ({ children }: { children: ReactNode }) => {
             changed = true;
           }
         } else {
-          // Nuevo hijo detectado en dependientes
+          // --- FALLBACK: Buscar hijo existente por nombre para evitar duplicados ---
+          // Usa un Set de índices ya vinculados para no reusar el mismo hijo cuando
+          // hay dos dependientes con nombre similar.
+          const fallbackIdx = newHijos.findIndex((h, idx) => 
+            h.nombre.trim().toLowerCase() === dep.nombre.trim().toLowerCase() && 
+            !usedFallbackIndices.has(idx)
+          );
+
+          if (fallbackIdx >= 0) {
+            // Re-vincular: actualizar ID y datos del dependiente sin crear duplicado
+            usedFallbackIndices.add(fallbackIdx);
+            const existingHijo = newHijos[fallbackIdx];
+            newHijos[fallbackIdx] = { ...existingHijo, id: dep.id, nombre: dep.nombre, edad: dep.edad, linked: true };
+            // Actualizar en el mapa para no usarlo dos veces
+            hijosMap.set(dep.id, { h: newHijos[fallbackIdx], idx: fallbackIdx });
+            changed = true;
+          } else {
+            // Genuinamente nuevo hijo detectado en dependientes
           const edadNum = parseInt(dep.edad);
           const defaultUni = LISTA_UNIVERSIDADES[0];
           let yearsFaltantes = 0;
@@ -748,9 +767,11 @@ export const FinancialProvider = ({ children }: { children: ReactNode }) => {
             universidad: defaultUni,
             yearsFaltantes,
             costoProyectado,
-            ahorroAnual
+            ahorroAnual,
+            linked: true
           });
           changed = true;
+          }
         }
       });
 
@@ -804,6 +825,7 @@ export const FinancialProvider = ({ children }: { children: ReactNode }) => {
       spouse_hobbies: data.perfil?.conyugeHobbies || "",
       spouse_sport: data.perfil?.conyugeDeporte || "",
       dependents: (data.perfil?.dependientes || []).map((d: any) => ({
+        id: d.id,
         name: d.nombre || "",
         age: parseNum(d.edad),
         relationship: d.parentesco || "",
@@ -817,6 +839,7 @@ export const FinancialProvider = ({ children }: { children: ReactNode }) => {
       note_risks: data.perfil?.notaRiesgos || "",
     },
     children: (data.hijos || []).map((h: any) => ({
+      id: h.id,
       name: h.nombre || "",
       age: parseNum(h.edad),
       university: h.universidad || "",
@@ -947,7 +970,59 @@ export const FinancialProvider = ({ children }: { children: ReactNode }) => {
     });
   };
 
-  const unmapClientData = (data: any) => ({
+  const unmapClientData = (data: any) => {
+    const ts = Date.now();
+
+    // 1. Generar dependientes con IDs estables (timestamp compartido)
+    const dependientes = (data.profile?.dependents || []).map((d: any, i: number) => ({
+      id: d.id || `dep-${ts}-${i}`,
+      nombre: d.name || "",
+      edad: toStr(d.age),
+      parentesco: d.relationship || "",
+      notas: d.notes || "",
+    }));
+
+    // 2. Identificar dependientes que son hijos para cross-reference con el arreglo de children
+    const depHijos = dependientes.filter((d: any) =>
+      d.parentesco.toLowerCase().includes("hijo")
+    );
+
+    // 3. Generar hijos con IDs alineados a sus dependientes correspondientes.
+    //    Esto evita que el useEffect CHILDREN SYNC los considere nuevos y cree duplicados.
+    const usedDepIds = new Set<string>();
+    const hijos = (data.children || []).map((h: any, i: number) => {
+      const nombre = h.name || "";
+      const edad = toStr(h.age);
+
+      // Buscar dependiente correspondiente por nombre+edad
+      const matchingDep = depHijos.find((d: any) =>
+        d.nombre.trim().toLowerCase() === nombre.trim().toLowerCase() &&
+        d.edad === edad &&
+        !usedDepIds.has(d.id)
+      );
+
+      let id: string;
+      if (h.id) {
+        id = h.id; // Preservar ID del servidor si existe
+      } else if (matchingDep) {
+        id = matchingDep.id; // Usar el MISMO ID que el dependiente
+        usedDepIds.add(id);
+      } else {
+        id = `hijo-${ts}-${i}`; // Hijo manual sin dependiente correspondiente
+      }
+
+      return {
+        id,
+        nombre,
+        edad,
+        universidad: h.university || "",
+        yearsFaltantes: h.years_remaining ?? 0,
+        costoProyectado: h.projected_cost ?? 0,
+        ahorroAnual: h.annual_savings ?? 0,
+      };
+    });
+
+    return {
     perfil: {
       telefono: data.profile?.phone || "",
       ocupacion: data.profile?.occupation || "",
@@ -963,13 +1038,7 @@ export const FinancialProvider = ({ children }: { children: ReactNode }) => {
       conyugeFuma: data.profile?.spouse_smoker || false,
       conyugeHobbies: data.profile?.spouse_hobbies || "",
       conyugeDeporte: data.profile?.spouse_sport || "",
-      dependientes: (data.profile?.dependents || []).map((d: any, i: number) => ({
-        id: d.id || `dep-${Date.now()}-${i}`,
-        nombre: d.name || "",
-        edad: toStr(d.age),
-        parentesco: d.relationship || "",
-        notas: d.notes || "",
-      })),
+      dependientes,
       notaProteccion: data.profile?.note_protection || "",
       notaEducacion: data.profile?.note_education || "",
       notaAhorro: data.profile?.note_savings || "",
@@ -977,15 +1046,7 @@ export const FinancialProvider = ({ children }: { children: ReactNode }) => {
       notaSalud: data.profile?.note_health || "",
       notaRiesgos: data.profile?.note_risks || "",
     },
-    hijos: (data.children || []).map((h: any, i: number) => ({
-      id: h.id || `hijo-${Date.now()}-${i}`,
-      nombre: h.name || "",
-      edad: toStr(h.age),
-      universidad: h.university || "",
-      yearsFaltantes: h.years_remaining ?? 0,
-      costoProyectado: h.projected_cost ?? 0,
-      ahorroAnual: h.annual_savings ?? 0,
-    })),
+    hijos,
     jubilacion: {
       esperanzaVida: toStr(data.retirement?.life_expectancy),
       edadRetiro: toStr(data.retirement?.retirement_age),
@@ -1069,7 +1130,8 @@ export const FinancialProvider = ({ children }: { children: ReactNode }) => {
       // Si el filtro eliminó todos los items (datos corruptos), usar defaults
       return validLevels.length > 0 ? validLevels : [...INITIAL_PIRAMIDE_LEVELS];
     })(),
-  });
+    };
+  };
 
   // --- SYNC COMO JSON PURO ---
   const forceSync = async (overrideList?: ClienteGuardado[], skipCloudRefresh?: boolean): Promise<string> => {

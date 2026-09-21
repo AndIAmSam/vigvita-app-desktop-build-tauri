@@ -1,4 +1,5 @@
 import React, { useEffect, useRef } from "react";
+import { CustomScrollView } from '../../components/CustomScrollView';
 import {
   View,
   Text,
@@ -148,7 +149,7 @@ export default function JubilacionScreen() {
         />
       </View>
 
-      <ScrollView
+      <CustomScrollView
         contentContainerStyle={styles.scrollContent}
         showsVerticalScrollIndicator={false}
       >
@@ -432,7 +433,7 @@ export default function JubilacionScreen() {
         </View>
 
         <View style={{ height: 100 }} />
-      </ScrollView>
+      </CustomScrollView>
     </View>
   );
 }
