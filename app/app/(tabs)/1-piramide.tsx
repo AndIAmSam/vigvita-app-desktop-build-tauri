@@ -248,6 +248,14 @@ const PyramidBlock = ({
 }: any) => {
   const isFirst = index === 0;
   const isLast = index === total - 1;
+  const isProteccion =
+    data.id === "pro" ||
+    data.label === "PROTECCIÓN" ||
+    data.label === "ESTILO DE VIDA";
+  const displayLabel = isProteccion ? "ESTILO DE VIDA" : data.label;
+  const displaySublabel =
+    data.sublabel || (isProteccion ? "(Protección Familiar)" : null);
+
   return (
     <Animated.View
       style={[
@@ -266,9 +274,12 @@ const PyramidBlock = ({
           name={data.icon}
           size={28}
           color="rgba(255,255,255,0.9)"
-          style={{ marginBottom: 6 }}
+          style={{ marginBottom: displaySublabel ? 4 : 6 }}
         />
-        <Text style={styles.blockText}>{data.label}</Text>
+        <Text style={styles.blockText}>{displayLabel}</Text>
+        {displaySublabel && (
+          <Text style={styles.blockSubtext}>{displaySublabel}</Text>
+        )}
       </View>
       <View style={styles.controlsContainer}>
         {!isFirst && (
@@ -408,6 +419,18 @@ const styles = StyleSheet.create({
     fontWeight: "900",
     letterSpacing: 2,
     textTransform: "uppercase",
+    textAlign: "center",
+    textShadowColor: "rgba(0,0,0,0.2)",
+    textShadowOffset: { width: 0, height: 1 },
+    textShadowRadius: 2,
+  },
+  blockSubtext: {
+    color: "rgba(255,255,255,0.9)",
+    fontSize: 11,
+    fontWeight: "700",
+    letterSpacing: 0.5,
+    marginTop: 2,
+    textAlign: "center",
     textShadowColor: "rgba(0,0,0,0.2)",
     textShadowOffset: { width: 0, height: 1 },
     textShadowRadius: 2,

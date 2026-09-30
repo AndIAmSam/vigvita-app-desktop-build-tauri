@@ -103,14 +103,15 @@ export const generatePDF = async (data: any, type: "cliente" | "asesor") => {
     parse(data.activos.inversiones) +
     parse(data.activos.otros);
 
+  const totales = data.totales || {};
   const capacidadAhorroReal =
-    totalIngresosMensualesReal - data.totales.gastosTotales;
+    totalIngresosMensualesReal - (totales.gastosTotales || 0);
 
   const deficitRealCorregido =
-    data.totales.capitalNecesario +
-    data.totales.gastosInmediatos -
+    (totales.capitalNecesario || 0) +
+    (totales.gastosInmediatos || 0) -
     activosSinCasa -
-    data.totales.totalSeguros;
+    (totales.totalSeguros || 0);
 
   let dependientesHtml = '<span class="no-aplica">Ninguno</span>';
   if (
@@ -199,6 +200,9 @@ export const generatePDF = async (data: any, type: "cliente" | "asesor") => {
             ${data.piramideLevels
         .map((level: any, index: number) => {
           const priorityNum = data.piramideLevels.length - index;
+          const isProteccion = level.id === "pro" || level.label === "PROTECCIÓN" || level.label === "ESTILO DE VIDA";
+          const labelText = isProteccion ? "ESTILO DE VIDA" : level.label;
+          const sublabelText = isProteccion ? ` <span style="font-size: 8px; font-weight: normal; opacity: 0.9; text-transform: none;">(Protección Familiar)</span>` : "";
 
           // SOLUCIÓN DEFINITIVA: Alturas exactas, line-height con !important y bloqueos de margen
           return `
@@ -208,7 +212,7 @@ export const generatePDF = async (data: any, type: "cliente" | "asesor") => {
                         <span style="font-size: 10px; font-weight: bold; position: relative; top: -4px;">${priorityNum}</span>
                     </div>
 
-                    <span style="position: relative; top: -2px;">${level.label}</span>
+                    <span style="position: relative; top: -2px;">${labelText}${sublabelText}</span>
 
                 </div>
             `;
@@ -237,7 +241,7 @@ export const generatePDF = async (data: any, type: "cliente" | "asesor") => {
                 ${data.hijos.map((h: any) => `<tr><td>${txt(h.nombre)}</td><td>${txt(h.edad)}</td><td>${h.yearsFaltantes}</td><td>${txt(h.universidad)}</td><td style="text-align: right;">${money(h.costoProyectado)}</td><td style="text-align: right;">${money(h.ahorroAnual)}</td></tr>`).join("")}
             </tbody>
         </table>
-        <div style="text-align:right; font-weight:bold; font-size:11px;">TOTAL AHORRO ANUAL EDUCACIÓN: ${money(data.totales.educacionAnual)}</div>
+        <div style="text-align:right; font-weight:bold; font-size:11px;">TOTAL AHORRO ANUAL EDUCACIÓN: ${money(totales.educacionAnual)}</div>
 
         <h2 style="background-color: #2665ad; color: white; padding-bottom: 10px;">2. Proyección de Retiro (Inflación Proyectada: 4%)</h2>
         <div class="grid">
@@ -248,9 +252,9 @@ export const generatePDF = async (data: any, type: "cliente" | "asesor") => {
                 <div class="row"><span class="label">Pensión Deseada:</span> <span class="value">${money(data.jubilacion.montoMensual)}</span></div>
             </div>
             <div class="col">
-                <div class="row"><span class="label">Capital (Valor Presente):</span> <span class="value" style="font-weight:bold">${money(data.totales.jubilacionCapital)}</span></div>
-                <div class="row"><span class="label">Capital (Valor Futuro):</span> <span class="value" style="font-weight:bold;">${money(data.totales.jubilacionCapitalFuturo)}</span></div>
-                <div class="row" style="margin-top:5px;"><span class="label">Ahorro Anual Sugerido:</span> <span class="value" style="font-weight:bold">${money(data.totales.jubilacionAhorroAnual)}</span></div>
+                <div class="row"><span class="label">Capital (Valor Presente):</span> <span class="value" style="font-weight:bold">${money(totales.jubilacionCapital)}</span></div>
+                <div class="row"><span class="label">Capital (Valor Futuro):</span> <span class="value" style="font-weight:bold;">${money(totales.jubilacionCapitalFuturo)}</span></div>
+                <div class="row" style="margin-top:5px;"><span class="label">Ahorro Anual Sugerido:</span> <span class="value" style="font-weight:bold">${money(totales.jubilacionAhorroAnual)}</span></div>
             </div>
         </div>
 
@@ -264,7 +268,7 @@ export const generatePDF = async (data: any, type: "cliente" | "asesor") => {
                 <div class="row"><span class="label">Vehículos:</span> <span class="value">${money(data.activos.vehiculos)}</span></div>
                 <div class="row"><span class="label">Inversiones:</span> <span class="value">${money(data.activos.inversiones)}</span></div>
                 <div class="row"><span class="label">Otros Activos:</span> <span class="value">${money(data.activos.otros)}</span></div>
-                <div class="row" style="background:#eee; font-weight:bold;"><span class="label">TOTAL ACTIVOS:</span> <span class="value">${money(data.totales.totalActivos)}</span></div>
+                <div class="row" style="background:#eee; font-weight:bold;"><span class="label">TOTAL ACTIVOS:</span> <span class="value">${money(totales.totalActivos)}</span></div>
             </div>
             <div class="col">
                 <div class="sub-title">PASIVOS</div>
@@ -272,7 +276,7 @@ export const generatePDF = async (data: any, type: "cliente" | "asesor") => {
                 <div class="row"><span class="label">Préstamos:</span> <span class="value">${money(data.pasivos.prestamos)}</span></div>
                 <div class="row"><span class="label">Tarjetas Crédito:</span> <span class="value">${money(data.pasivos.tarjetas)}</span></div>
                 <div class="row"><span class="label">Otras Deudas:</span> <span class="value">${money(data.pasivos.otros)}</span></div>
-                <div class="row" style="background:#eee; font-weight:bold;"><span class="label">TOTAL PASIVOS:</span> <span class="value">${money(data.totales.totalPasivos)}</span></div>
+                <div class="row" style="background:#eee; font-weight:bold;"><span class="label">TOTAL PASIVOS:</span> <span class="value">${money(totales.totalPasivos)}</span></div>
             </div>
         </div>
         
@@ -280,12 +284,12 @@ export const generatePDF = async (data: any, type: "cliente" | "asesor") => {
         <table>
             <thead><tr><th>Tipo</th><th>Compañía</th><th>Plan</th><th style="text-align: right;">Suma Aseg.</th><th style="text-align: right;">Prima</th></tr></thead>
             <tbody>
-                <tr><td>Individual</td><td>${txt(data.seguros.individual.compania)}</td><td>${txt(data.seguros.individual.plan)}</td><td style="text-align: right;">${money(data.seguros.individual.sumaAsegurada)}</td><td style="text-align: right;">${money(data.seguros.individual.prima)}</td></tr>
-                <tr><td>Colectivo</td><td>${txt(data.seguros.colectivo.compania)}</td><td>${txt(data.seguros.colectivo.plan)}</td><td style="text-align: right;">${money(data.seguros.colectivo.sumaAsegurada)}</td><td style="text-align: right;">${money(data.seguros.colectivo.prima)}</td></tr>
-                <tr><td>Otros</td><td>${txt(data.seguros.otros.compania)}</td><td>${txt(data.seguros.otros.plan)}</td><td style="text-align: right;">${money(data.seguros.otros.sumaAsegurada)}</td><td style="text-align: right;">${money(data.seguros.otros.prima)}</td></tr>
+                <tr><td>Individual</td><td>${txt(data.seguros?.individual?.compania)}</td><td>${txt(data.seguros?.individual?.plan)}</td><td style="text-align: right;">${money(data.seguros?.individual?.sumaAsegurada)}</td><td style="text-align: right;">${money(data.seguros?.individual?.prima)}</td></tr>
+                <tr><td>Colectivo</td><td>${txt(data.seguros?.colectivo?.compania)}</td><td>${txt(data.seguros?.colectivo?.plan)}</td><td style="text-align: right;">${money(data.seguros?.colectivo?.sumaAsegurada)}</td><td style="text-align: right;">${money(data.seguros?.colectivo?.prima)}</td></tr>
+                <tr><td>Otros</td><td>${txt(data.seguros?.otros?.compania)}</td><td>${txt(data.seguros?.otros?.plan)}</td><td style="text-align: right;">${money(data.seguros?.otros?.sumaAsegurada)}</td><td style="text-align: right;">${money(data.seguros?.otros?.prima)}</td></tr>
             </tbody>
         </table>
-        <div style="text-align:right; font-weight:bold; font-size:11px;">TOTAL SUMA ASEGURADA: ${money(data.totales.totalSeguros)}</div>
+        <div style="text-align:right; font-weight:bold; font-size:11px;">TOTAL SUMA ASEGURADA: ${money(totales.totalSeguros)}</div>
 
         <h2 style="background-color: #2665ad; color: white; padding-bottom: 10px;">4. Análisis de Flujo de Efectivo</h2>
         <div class="grid">
@@ -317,7 +321,7 @@ export const generatePDF = async (data: any, type: "cliente" | "asesor") => {
                 <div class="row"><span class="label">Otros:</span> <span class="value">${money(data.gastosVariables.otros)}</span></div>
              </div>
         </div>
-        <div style="text-align:right; font-weight:bold; margin-top:5px;">TOTAL GASTOS: ${money(data.totales.gastosTotales)}</div>
+        <div style="text-align:right; font-weight:bold; margin-top:5px;">TOTAL GASTOS: ${money(totales.gastosTotales)}</div>
         
         </div>
         
@@ -327,14 +331,14 @@ export const generatePDF = async (data: any, type: "cliente" | "asesor") => {
         <div class="row"><span class="label">Ingreso Mensual Familiar Actual:</span> <span class="value">${money(totalIngresosMensualesReal)}</span></div>
         <div class="row"><span class="label">(-) Ingreso del Cónyuge:</span> <span class="value">- ${money(data.ingresos.conyuge)}</span></div>
         <div class="row"><span class="label">(-) Otros Ingresos (Rentas, etc):</span> <span class="value">- ${money(data.detalle.otrosIngresos)}</span></div>
-        <div class="row" style="font-weight:bold;"><span class="label">(=) Ingreso Mensual a Recuperar:</span> <span class="value">${money(data.totales.ingresoMensualNecesario)}</span></div>
+        <div class="row" style="font-weight:bold;"><span class="label">(=) Ingreso Mensual a Recuperar:</span> <span class="value">${money(totales.ingresoMensualNecesario)}</span></div>
         <br/>
-        <div class="row"><span class="label">Capital Necesario (Generador de Rentas al ${txt(data.detalle.tasaInteres)}%):</span> <span class="value">${money(data.totales.capitalNecesario)}</span></div>
-        <div class="row"><span class="label">(+) Pasivos + Sepelio (${money(data.fallecimiento.gastosSepelio)}):</span> <span class="value">+ ${money(data.totales.gastosInmediatos)}</span></div>
+        <div class="row"><span class="label">Capital Necesario (Generador de Rentas al ${txt(data.detalle.tasaInteres)}%):</span> <span class="value">${money(totales.capitalNecesario)}</span></div>
+        <div class="row"><span class="label">(+) Pasivos + Sepelio (${money(data.fallecimiento.gastosSepelio)}):</span> <span class="value">+ ${money(totales.gastosInmediatos)}</span></div>
         
         <div class="row"><span class="label">(-) Activos Realizables (Sin Casa):</span> <span class="value">- ${money(activosSinCasa)}</span></div>
         
-        <div class="row"><span class="label">(-) Seguros Vigentes:</span> <span class="value">- ${money(data.totales.totalSeguros)}</span></div>
+        <div class="row"><span class="label">(-) Seguros Vigentes:</span> <span class="value">- ${money(totales.totalSeguros)}</span></div>
         
         <div class="total-box">
             CAPITAL REAL DE PROTECCIÓN: ${money(deficitRealCorregido)}
@@ -342,9 +346,9 @@ export const generatePDF = async (data: any, type: "cliente" | "asesor") => {
 
         <div style="margin-top: 15px; padding: 5px; border-top: 2px dashed #ccc;">
             <div style="font-weight:bold; margin-bottom:5px; text-transform:uppercase;">Análisis por Incapacidad Total</div>
-            <div class="row"><span class="label">Pasivos Totales:</span> <span class="value">${money(data.totales.totalPasivos)}</span></div>
+            <div class="row"><span class="label">Pasivos Totales:</span> <span class="value">${money(totales.totalPasivos)}</span></div>
             <div class="row"><span class="label">Gastos Ajuste Vida:</span> <span class="value">${money(data.fallecimiento.gastosIncapacidad)}</span></div>
-            <div class="total-box">NECESIDAD TOTAL (INCAPACIDAD): ${money(data.totales.gastosIncapacidadTotal)}</div>
+            <div class="total-box">NECESIDAD TOTAL (INCAPACIDAD): ${money(totales.gastosIncapacidadTotal)}</div>
         </div>
 
         <div style="text-align:center; font-size:10px; margin-top:5px;">

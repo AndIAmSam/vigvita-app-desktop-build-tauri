@@ -441,7 +441,7 @@ const INITIAL_PIRAMIDE_LEVELS = [
   { id: "jub", label: "JUBILACIÓN", color: "#0e8ece", icon: "plane" },
   { id: "aho", label: "AHORRO", color: "#2665ad", icon: "bank" },
   { id: "edu", label: "EDUCACIÓN", color: "#8cbe27", icon: "graduation-cap" },
-  { id: "pro", label: "PROTECCIÓN", color: "#161616", icon: "shield" },
+  { id: "pro", label: "ESTILO DE VIDA", sublabel: "(Protección Familiar)", color: "#161616", icon: "shield" },
 ];
 
 // ==========================================
@@ -825,7 +825,6 @@ export const FinancialProvider = ({ children }: { children: ReactNode }) => {
       spouse_hobbies: data.perfil?.conyugeHobbies || "",
       spouse_sport: data.perfil?.conyugeDeporte || "",
       dependents: (data.perfil?.dependientes || []).map((d: any) => ({
-        id: d.id,
         name: d.nombre || "",
         age: parseNum(d.edad),
         relationship: d.parentesco || "",
@@ -839,7 +838,6 @@ export const FinancialProvider = ({ children }: { children: ReactNode }) => {
       note_risks: data.perfil?.notaRiesgos || "",
     },
     children: (data.hijos || []).map((h: any) => ({
-      id: h.id,
       name: h.nombre || "",
       age: parseNum(h.edad),
       university: h.universidad || "",
@@ -1140,16 +1138,16 @@ export const FinancialProvider = ({ children }: { children: ReactNode }) => {
       return "Sincronización ya en curso.";
     }
 
-    // DEV MODE BYPASS: Evitar auto-sincronización y logouts forzados por token falso
-    if (advisor?.id === "DEV-MODE") {
-      setSyncStatus("synced");
-      return "✅ DEV-MODE: Guardado sólo local. Sincronización saltada.";
-    }
-
     // CAPACITACIÓN BYPASS: Restricción absoluta para evitar enviar ADNs de prueba a la base de datos
     if (advisor?.training) {
       setSyncStatus("synced");
       return "ℹ️ Modo Capacitación: El ADN se ha guardado en tu memoria local exitosamente. No se sincronizará a la nube para no alterar las métricas reales.";
+    }
+
+    // DEV MODE BYPASS: Evitar auto-sincronización y logouts forzados por token falso
+    if (advisor?.id === "DEV-MODE") {
+      setSyncStatus("synced");
+      return "✅ DEV-MODE: Guardado sólo local. Sincronización saltada.";
     }
 
     if (!isOnline) {
@@ -2629,9 +2627,12 @@ export const FinancialProvider = ({ children }: { children: ReactNode }) => {
     setCita(d.cita || initialCita);
     setReferidos(d.referidos || []);
     setNotas(d.notas || "");
+    const validPiramide = Array.isArray(d.piramideLevels)
+      ? d.piramideLevels.filter((l: any) => l && l.id && l.label)
+      : [];
     setPiramideLevels(
-      Array.isArray(d.piramideLevels) && d.piramideLevels.length > 0
-        ? d.piramideLevels
+      validPiramide.length > 0
+        ? validPiramide
         : [...INITIAL_PIRAMIDE_LEVELS]
     );
     showAlert(`Cargado: ${cliente.nombre}`);

@@ -7,7 +7,11 @@
     "android": "expo start --android",
     "ios": "expo start --ios",
     "web": "expo start --web",
-    "test": "jest"
+    "test": "jest --silent",
+    "test:verbose": "jest",
+    "test:watch": "jest --watch",
+    "test:coverage": "jest --coverage --collectCoverageFrom='context/**/*.{ts,tsx}' --collectCoverageFrom='utils/**/*.{ts,tsx}' --collectCoverageFrom='constants/**/*.{ts,tsx}' --collectCoverageFrom='components/**/*.{ts,tsx}' --silent",
+    "test:ci": "jest --ci --forceExit --detectOpenHandles --silent"
   },
   "dependencies": {
     "@expo/vector-icons": "^15.0.3",
