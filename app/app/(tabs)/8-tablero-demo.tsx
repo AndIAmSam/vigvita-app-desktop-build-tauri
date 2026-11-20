@@ -4,6 +4,7 @@ import { View, Text, ScrollView, TextInput, StyleSheet, TouchableOpacity, Alert,
 import { FontAwesome } from '@expo/vector-icons';
 import { useRouter } from 'expo-router';
 import { useFinancialData, ClienteGuardado } from '../../context/FinancialContext';
+import { filterVisibleAdvisors } from '../../constants/AdminIgnoredAdvisors';
 
 // --- COLORES ---
 const COLORS = {
@@ -31,7 +32,7 @@ export default function TableroCopiaScreen() {
         nombreCliente, guardarProspecto, listaClientes, cargarProspecto, borrarCliente, nuevoAnalisis, actualizarEstadoProspecto,
         importarRespaldo, forceSync, syncStatus, currentClientId, cita,
         listaNube, isFetchingCloud, fetchSincronizadosNube,
-        isLider, equipoLider, verificarLider, asesorSeleccionadoGlobal, setAsesorSeleccionadoGlobal,
+        isLider, isAdmin, equipoLider, verificarLider, asesorSeleccionadoGlobal, setAsesorSeleccionadoGlobal,
         actualizarAcompanamiento, actualizarAsesorProspecto
     } = useFinancialData();
 
@@ -61,11 +62,15 @@ export default function TableroCopiaScreen() {
     const [modalAsesoresVisible, setModalAsesoresVisible] = useState(false);
     const [reassigningClient, setReassigningClient] = useState<ClienteGuardado | null>(null);
     const [searchAdvisorText, setSearchAdvisorText] = useState("");
+    const visibleAdvisors = useMemo(
+        () => filterVisibleAdvisors(equipoLider, isAdmin),
+        [equipoLider, isAdmin]
+    );
     const filteredAdvisors = useMemo(() => {
         const q = searchAdvisorText.trim().toLowerCase();
-        if (!q) return equipoLider;
-        return equipoLider.filter((m) => m.nombre.toLowerCase().includes(q));
-    }, [equipoLider, searchAdvisorText]);
+        if (!q) return visibleAdvisors;
+        return visibleAdvisors.filter((m) => m.nombre.toLowerCase().includes(q));
+    }, [visibleAdvisors, searchAdvisorText]);
     const pendingCount = useMemo(
         () => listaClientes.filter((c) => !c.sincronizado).length,
         [listaClientes]
@@ -906,7 +911,7 @@ export default function TableroCopiaScreen() {
                             </TouchableOpacity>
                         )}
 
-                        {equipoLider.length > 0 && (
+                        {visibleAdvisors.length > 0 && (
                             <View style={[styles.searchInputWrapper, { width: '100%', marginBottom: 12, height: 42 }]}>
                                 <FontAwesome name="search" size={14} color="#9ca3af" style={{ marginLeft: 12 }} />
                                 <TextInput
@@ -925,7 +930,7 @@ export default function TableroCopiaScreen() {
                         )}
 
                         <View style={{ width: '100%', maxHeight: 300, marginBottom: 20 }}>
-                            {equipoLider.length === 0 ? (
+                            {visibleAdvisors.length === 0 ? (
                                 <View style={{ alignItems: 'center', paddingVertical: 20 }}>
                                     <Text style={{ fontSize: 13, color: COLORS.textoGris, textAlign: 'center', marginBottom: 12 }}>
                                         No se encontraron asesores disponibles.

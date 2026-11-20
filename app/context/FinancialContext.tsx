@@ -64,6 +64,7 @@ export interface Advisor {
   token: string;
   training?: boolean;
   isLider?: boolean;
+  isAdmin?: boolean;
 }
 
 export interface Dependiente {
@@ -234,11 +235,12 @@ interface FinancialData {
   logout: () => Promise<void>;
   validateSession: () => Promise<boolean>;
   isAuthenticated: boolean;
-  bypassLoginForDev: (role?: 'lider' | 'asesor' | 'training') => Promise<void>;
+  bypassLoginForDev: (role?: 'lider' | 'admin' | 'asesor' | 'training') => Promise<void>;
   accessExpiresAt: string | null;
 
-  // NUEVO: Líder
+  // NUEVO: Líder / SuperAdmin
   isLider: boolean;
+  isAdmin: boolean;
   equipoLider: { id: string; nombre: string }[];
   verificarLider: () => Promise<void>;
   asesorSeleccionadoGlobal: { id: string, nombre: string } | null;
@@ -2349,6 +2351,14 @@ export const FinancialProvider = ({ children }: { children: ReactNode }) => {
 
         Logger.info(`Login exitoso`, { email });
 
+        // API Desktop v16: SuperAdmin recibe redirect `/admin/dashboard` (y is_leader: true),
+        // mientras TeamLeader recibe `/teamleader/home` (y is_leader: true).
+        const redirectPath =
+          typeof data.redirect === "string" ? data.redirect.trim().toLowerCase() : "";
+        const isAdminUser =
+          data.is_leader === true &&
+          (redirectPath === "/admin" || redirectPath.startsWith("/admin/"));
+
         const user: Advisor = {
           id: "ADV-" + Math.floor(Math.random() * 1000),
           nombre: data.name || "",
@@ -2356,6 +2366,7 @@ export const FinancialProvider = ({ children }: { children: ReactNode }) => {
           token: data.token,
           training: data.training === true,
           isLider: data.is_leader === true,
+          isAdmin: isAdminUser,
         };
 
         const sessionData = {
@@ -2406,14 +2417,15 @@ export const FinancialProvider = ({ children }: { children: ReactNode }) => {
     }
   };
 
-  const bypassLoginForDev = async (role: 'lider' | 'asesor' | 'training' = 'asesor') => {
+  const bypassLoginForDev = async (role: 'lider' | 'admin' | 'asesor' | 'training' = 'asesor') => {
     const devUser: Advisor = {
       id: "DEV-MODE",
       nombre: `Desarrollador (${role})`,
       email: "dev@local.host",
       token: "dev-fake-token",
       training: role === 'training',
-      isLider: role === 'lider',
+      isLider: role === 'lider' || role === 'admin',
+      isAdmin: role === 'admin',
     };
 
     const sessionData = {
@@ -3506,8 +3518,9 @@ export const FinancialProvider = ({ children }: { children: ReactNode }) => {
         actualizarAsesorProspecto,
         importarRespaldo, // <--- Para respaldos
 
-        // Líder de Equipo
+        // Líder de Equipo / SuperAdmin
         isLider,
+        isAdmin: advisor?.isAdmin === true,
         equipoLider,
         verificarLider,
         asesorSeleccionadoGlobal,

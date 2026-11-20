@@ -156,6 +156,83 @@ describe('Auth — Login, Logout, Session Management', () => {
     await act(async () => { jest.runAllTimers(); });
 
     expect(ctx.advisor.isLider).toBe(true);
+    expect(ctx.advisor.isAdmin).toBe(false);
+    expect(ctx.isAdmin).toBe(false);
+  });
+
+  it('Login de SuperAdmin (redirect /admin/dashboard + is_leader=true) activa isAdmin=true sin afectar a TeamLeader', async () => {
+    global.fetch = jest.fn((url: string) => {
+      if (url.includes('/api/login')) {
+        return Promise.resolve({
+          ok: true, status: 200,
+          json: () => Promise.resolve({
+            token: 'admin-token',
+            name: 'Super Admin',
+            redirect: '/admin/dashboard',
+            training: false,
+            is_leader: true,
+          }),
+        });
+      }
+      if (url.includes('/api/profile-advisors')) {
+        return Promise.resolve({
+          ok: true, status: 200,
+          json: () => Promise.resolve({
+            advisors: [
+              { id: '11111111-1111-4111-8111-111111111111', name: 'EVER' },
+              { id: '22222222-2222-4222-8222-222222222222', name: 'Asesor Real' },
+            ],
+          }),
+        });
+      }
+      return Promise.resolve({ ok: true, status: 200, json: () => Promise.resolve({ profiles: [], access_expires_at: null }) });
+    }) as jest.Mock;
+
+    await act(async () => {
+      await ctx.login('admin@vigvita.com', 'pass');
+    });
+    await act(async () => { jest.runAllTimers(); });
+
+    expect(ctx.advisor.isLider).toBe(true);
+    expect(ctx.advisor.isAdmin).toBe(true);
+    expect(ctx.isAdmin).toBe(true);
+    // equipoLider en contexto conserva TODOS los asesores para no romper hidratación/sync
+    expect(ctx.equipoLider).toHaveLength(2);
+
+    // TeamLeader con redirect /teamleader/home NO debe marcar isAdmin
+    await act(async () => { await ctx.logout(); });
+    expect(ctx.isAdmin).toBe(false);
+
+    global.fetch = jest.fn((url: string) => {
+      if (url.includes('/api/login')) {
+        return Promise.resolve({
+          ok: true, status: 200,
+          json: () => Promise.resolve({
+            token: 'tl-token',
+            name: 'Team Leader',
+            redirect: '/teamleader/home',
+            training: false,
+            is_leader: true,
+          }),
+        });
+      }
+      if (url.includes('/api/profile-advisors')) {
+        return Promise.resolve({
+          ok: true, status: 200,
+          json: () => Promise.resolve({ advisors: [] }),
+        });
+      }
+      return Promise.resolve({ ok: true, status: 200, json: () => Promise.resolve({ profiles: [], access_expires_at: null }) });
+    }) as jest.Mock;
+
+    await act(async () => {
+      await ctx.login('tl@vigvita.com', 'pass');
+    });
+    await act(async () => { jest.runAllTimers(); });
+
+    expect(ctx.advisor.isLider).toBe(true);
+    expect(ctx.advisor.isAdmin).toBe(false);
+    expect(ctx.isAdmin).toBe(false);
   });
 
   // --- LOGOUT ---
