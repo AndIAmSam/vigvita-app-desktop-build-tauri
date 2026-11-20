@@ -340,16 +340,47 @@ describe('Edge Cases', () => {
     expect(didCrash).toBe(false);
   });
 
-  it('Prospecto con nombre largo (100+ chars) se recorta en payload', async () => {
-    const longName = 'A'.repeat(150);
+  it('Prospecto con nombre largo (>100 bytes UTF-8) se conserva local y se recorta a <=100 bytes en payload', async () => {
+    const longName = 'José María '.repeat(12); // > 100 bytes UTF-8
+    let capturedPayload: any = null;
+    const srvUuid = '33333333-3333-4333-8333-333333333333';
+
+    global.fetch = jest.fn((url: string, opts?: any) => {
+      if (opts?.method === 'POST' && url.includes('/api/profiles/new')) {
+        capturedPayload = JSON.parse(opts.body);
+        return Promise.resolve({
+          ok: true,
+          status: 201,
+          json: () => Promise.resolve({ data: [srvUuid] }),
+        });
+      }
+      if (url.includes(srvUuid)) {
+        return Promise.resolve({
+          ok: true,
+          status: 200,
+          json: () => Promise.resolve({ data: JSON.stringify(FIXTURES.FULL_SERVER_DATA()) }),
+        });
+      }
+      return Promise.resolve({ ok: true, status: 200, json: () => Promise.resolve({ profiles: [] }) });
+    }) as jest.Mock;
+
+    const mockStorage = require('@react-native-async-storage/async-storage');
+    mockStorage.getItem.mockImplementation(async (key: string) => {
+      if (key === 'advisor_session') return JSON.stringify(FIXTURES.SESSION());
+      return null;
+    });
+
+    root.unmount();
+    root = await mountProvider();
+    await act(async () => { jest.runAllTimers(); });
+
     await act(async () => { ctx.setNombreCliente(longName); });
     await act(async () => { await ctx.guardarProspecto(); });
     await act(async () => { jest.runAllTimers(); });
 
-    // The full name is preserved in local storage
-    expect(ctx.listaClientes[0].nombre).toBe(longName);
-    // But when sent to server, it would be truncated to 100 in forceSync
-    // (We can verify by checking the payload if we use a real advisor)
+    expect(capturedPayload).toBeDefined();
+    expect(Buffer.byteLength(capturedPayload.clients[0].name, 'utf8')).toBeLessThanOrEqual(100);
+    expect(capturedPayload.clients[0].name.length).toBeGreaterThan(0);
   });
 
   it('upsertReferido: actualiza existente o agrega nuevo', async () => {

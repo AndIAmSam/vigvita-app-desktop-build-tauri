@@ -127,89 +127,95 @@ export const jsonResponse = (status: number, body: any) => ({
 // ============================================================
 // 4. COMMON FIXTURES
 // ============================================================
+const DEFAULT_ADVISOR = {
+  id: 'ADV-TEST',
+  nombre: 'Test Advisor',
+  email: 'test@vigvita.com',
+  token: 'fake-token-123',
+  training: false,
+  isLider: false,
+};
+
+const DEFAULT_ADVISOR_TRAINING = {
+  id: 'ADV-TRAIN',
+  nombre: 'Trainee',
+  email: 'train@vigvita.com',
+  token: 'fake-token-train',
+  training: true,
+  isLider: false,
+};
+
+const createFullClientData = () => ({
+  perfil: {
+    telefono: '5551234567',
+    ocupacion: 'Ingeniero',
+    hobbies: 'Lectura',
+    deporte: 'Natación',
+    fuma: false,
+    fechaNacimiento: '15/03/1990',
+    estadoCivil: 'Casado',
+    conyugeNombre: 'María López',
+    conyugeTelefono: '5559876543',
+    conyugeFechaNacimiento: '20/07/1992',
+    conyugeOcupacion: 'Doctora',
+    conyugeFuma: false,
+    conyugeHobbies: 'Yoga',
+    conyugeDeporte: 'Running',
+    dependientes: [
+      { id: 'dep-1', nombre: 'Carlitos', edad: '5', parentesco: 'Hijo', notas: '' },
+      { id: 'dep-2', nombre: 'Ana', edad: '3', parentesco: 'Hija', notas: 'Alergia' },
+    ],
+    notaProteccion: 'Nota protección',
+    notaEducacion: 'Nota educación',
+    notaAhorro: 'Nota ahorro',
+    notaJubilacion: 'Nota jubilación',
+    notaSalud: 'Nota salud',
+    notaRiesgos: 'Nota riesgos',
+  },
+  hijos: [
+    { id: 'dep-1', nombre: 'Carlitos', edad: '5', universidad: 'Unitec', yearsFaltantes: 13, costoProyectado: 816184.26, ahorroAnual: 62783.4 },
+    { id: 'dep-2', nombre: 'Ana', edad: '3', universidad: 'UVM', yearsFaltantes: 15, costoProyectado: 1370954.02, ahorroAnual: 91396.93 },
+  ],
+  jubilacion: { esperanzaVida: '85', edadRetiro: '65', montoMensual: '50000', edadActual: '34' },
+  activos: { ahorros: '500000', casa: '3000000', otrosInmuebles: '0', vehiculos: '350000', inversiones: '200000', otros: '0' },
+  pasivos: { hipoteca: '1500000', prestamos: '100000', tarjetas: '50000', limiteCredito: '200000', otros: '0' },
+  seguros: {
+    individual: { compania: 'GNP', plan: 'Vida Plus', sumaAsegurada: '5000000', prima: '12000' },
+    colectivo: { compania: 'MetLife', plan: 'Colectivo', sumaAsegurada: '2000000', prima: '0' },
+    otros: { compania: '', plan: '', sumaAsegurada: '', prima: '' },
+  },
+  ingresos: { titular: '80000', conyuge: '60000', prestacionesTitular: 'Aguinaldo, Vales', prestacionesConyuge: 'IMSS' },
+  gastosBasicos: { servicios: '3000', vivienda: '15000', alimentacion: '8000', colegios: '12000', transporte: '5000', seguros: '2000' },
+  gastosVariables: { creditos: '5000', recreacion: '3000', entretenimiento: '2000', domestico: '4000', salud: '1000', otros: '1000' },
+  fallecimiento: { gastosSepelio: '100000', gastosIncapacidad: '500000' },
+  detalle: { otrosIngresos: '10000', tasaInteres: '8', planProteccion: '10', planAhorro: '7' },
+  cita: { dia: '15', mes: 'Octubre', hora: '10:00', lugar: 'Oficina', necesitaDecisionMaker: true, nombreDecisionMaker: 'María López' },
+  referidos: [
+    { id: 'Familiar-0', nombre: 'Pedro Gómez', edad: '40', estadoCivil: 'Casado', ocupacion: 'Abogado', telefono: '5551112222', entorno: 'Familiar', grupoFamiliar: 'Tío', notas: '' },
+    { id: 'Social-0', nombre: 'Laura Sánchez', edad: '35', estadoCivil: 'Soltera', ocupacion: 'Contadora', telefono: '5553334444', entorno: 'Social', grupoFamiliar: '', notas: 'Interesada' },
+  ],
+  notas: 'Notas generales del prospecto',
+  piramideLevels: [
+    { id: 'pro', label: 'ESTILO DE VIDA', color: '#161616', icon: 'shield' },
+    { id: 'edu', label: 'EDUCACIÓN', color: '#8cbe27', icon: 'graduation-cap' },
+    { id: 'aho', label: 'AHORRO', color: '#2665ad', icon: 'bank' },
+    { id: 'jub', label: 'JUBILACIÓN', color: '#0e8ece', icon: 'plane' },
+  ],
+});
+
 export const FIXTURES = {
-  ADVISOR: {
-    id: 'ADV-TEST',
-    nombre: 'Test Advisor',
-    email: 'test@vigvita.com',
-    token: 'fake-token-123',
-    training: false,
-    isLider: false,
-  },
+  ADVISOR: DEFAULT_ADVISOR,
 
-  ADVISOR_TRAINING: {
-    id: 'ADV-TRAIN',
-    nombre: 'Trainee',
-    email: 'train@vigvita.com',
-    token: 'fake-token-train',
-    training: true,
-    isLider: false,
-  },
+  ADVISOR_TRAINING: DEFAULT_ADVISOR_TRAINING,
 
-  SESSION: (advisor = FIXTURES.ADVISOR) => ({
+  SESSION: (advisor = DEFAULT_ADVISOR) => ({
     user: advisor,
     loginTime: Date.now(),
     sessionVersion: 2,
   }),
 
   /** A fully populated client data snapshot (Spanish/local format) */
-  FULL_CLIENT_DATA: () => ({
-    perfil: {
-      telefono: '5551234567',
-      ocupacion: 'Ingeniero',
-      hobbies: 'Lectura',
-      deporte: 'Natación',
-      fuma: false,
-      fechaNacimiento: '15/03/1990',
-      estadoCivil: 'Casado',
-      conyugeNombre: 'María López',
-      conyugeTelefono: '5559876543',
-      conyugeFechaNacimiento: '20/07/1992',
-      conyugeOcupacion: 'Doctora',
-      conyugeFuma: false,
-      conyugeHobbies: 'Yoga',
-      conyugeDeporte: 'Running',
-      dependientes: [
-        { id: 'dep-1', nombre: 'Carlitos', edad: '5', parentesco: 'Hijo', notas: '' },
-        { id: 'dep-2', nombre: 'Ana', edad: '3', parentesco: 'Hija', notas: 'Alergia' },
-      ],
-      notaProteccion: 'Nota protección',
-      notaEducacion: 'Nota educación',
-      notaAhorro: 'Nota ahorro',
-      notaJubilacion: 'Nota jubilación',
-      notaSalud: 'Nota salud',
-      notaRiesgos: 'Nota riesgos',
-    },
-    hijos: [
-      { id: 'dep-1', nombre: 'Carlitos', edad: '5', universidad: 'Unitec', yearsFaltantes: 13, costoProyectado: 816184.26, ahorroAnual: 62783.4 },
-      { id: 'dep-2', nombre: 'Ana', edad: '3', universidad: 'UVM', yearsFaltantes: 15, costoProyectado: 1370954.02, ahorroAnual: 91396.93 },
-    ],
-    jubilacion: { esperanzaVida: '85', edadRetiro: '65', montoMensual: '50000', edadActual: '34' },
-    activos: { ahorros: '500000', casa: '3000000', otrosInmuebles: '0', vehiculos: '350000', inversiones: '200000', otros: '0' },
-    pasivos: { hipoteca: '1500000', prestamos: '100000', tarjetas: '50000', limiteCredito: '200000', otros: '0' },
-    seguros: {
-      individual: { compania: 'GNP', plan: 'Vida Plus', sumaAsegurada: '5000000', prima: '12000' },
-      colectivo: { compania: 'MetLife', plan: 'Colectivo', sumaAsegurada: '2000000', prima: '0' },
-      otros: { compania: '', plan: '', sumaAsegurada: '', prima: '' },
-    },
-    ingresos: { titular: '80000', conyuge: '60000', prestacionesTitular: 'Aguinaldo, Vales', prestacionesConyuge: 'IMSS' },
-    gastosBasicos: { servicios: '3000', vivienda: '15000', alimentacion: '8000', colegios: '12000', transporte: '5000', seguros: '2000' },
-    gastosVariables: { creditos: '5000', recreacion: '3000', entretenimiento: '2000', domestico: '4000', salud: '1000', otros: '1000' },
-    fallecimiento: { gastosSepelio: '100000', gastosIncapacidad: '500000' },
-    detalle: { otrosIngresos: '10000', tasaInteres: '8', planProteccion: '10', planAhorro: '7' },
-    cita: { dia: '15', mes: 'Octubre', hora: '10:00', lugar: 'Oficina', necesitaDecisionMaker: true, nombreDecisionMaker: 'María López' },
-    referidos: [
-      { id: 'Familiar-0', nombre: 'Pedro Gómez', edad: '40', estadoCivil: 'Casado', ocupacion: 'Abogado', telefono: '5551112222', entorno: 'Familiar', grupoFamiliar: 'Tío', notas: '' },
-      { id: 'Social-0', nombre: 'Laura Sánchez', edad: '35', estadoCivil: 'Soltera', ocupacion: 'Contadora', telefono: '5553334444', entorno: 'Social', grupoFamiliar: '', notas: 'Interesada' },
-    ],
-    notas: 'Notas generales del prospecto',
-    piramideLevels: [
-      { id: 'pro', label: 'ESTILO DE VIDA', color: '#161616', icon: 'shield' },
-      { id: 'edu', label: 'EDUCACIÓN', color: '#8cbe27', icon: 'graduation-cap' },
-      { id: 'aho', label: 'AHORRO', color: '#2665ad', icon: 'bank' },
-      { id: 'jub', label: 'JUBILACIÓN', color: '#0e8ece', icon: 'plane' },
-    ],
-  }),
+  FULL_CLIENT_DATA: createFullClientData,
 
   /** A server-format data payload (English/API format) */
   FULL_SERVER_DATA: () => ({
@@ -276,7 +282,7 @@ export const FIXTURES = {
     nombre: 'Juan Pérez',
     fechaCreacion: '01/01/2026',
     sincronizado: true,
-    data: FIXTURES.FULL_CLIENT_DATA(),
+    data: createFullClientData(),
     ...overrides,
   }),
 
@@ -285,7 +291,7 @@ export const FIXTURES = {
     nombre: 'Carlos Nuevo',
     fechaCreacion: '15/09/2026',
     sincronizado: false,
-    data: FIXTURES.FULL_CLIENT_DATA(),
+    data: createFullClientData(),
     ...overrides,
   }),
 };

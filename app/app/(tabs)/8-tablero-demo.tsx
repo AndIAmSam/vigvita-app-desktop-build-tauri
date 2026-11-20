@@ -29,10 +29,10 @@ export default function TableroCopiaScreen() {
     const {
         advisor, logout, showAlert,
         nombreCliente, guardarProspecto, listaClientes, cargarProspecto, borrarCliente, nuevoAnalisis, actualizarEstadoProspecto,
-        importarRespaldo, forceSync, currentClientId, cita,
+        importarRespaldo, forceSync, syncStatus, currentClientId, cita,
         listaNube, isFetchingCloud, fetchSincronizadosNube,
-        isLider, equipoLider, asesorSeleccionadoGlobal, setAsesorSeleccionadoGlobal,
-        actualizarAcompanamiento
+        isLider, equipoLider, verificarLider, asesorSeleccionadoGlobal, setAsesorSeleccionadoGlobal,
+        actualizarAcompanamiento, actualizarAsesorProspecto
     } = useFinancialData();
 
     const [searchText, setSearchText] = useState("");
@@ -59,6 +59,17 @@ export default function TableroCopiaScreen() {
 
     // --- ESTADO LÍDER DE EQUIPO (Manejado por Contexto) ---
     const [modalAsesoresVisible, setModalAsesoresVisible] = useState(false);
+    const [reassigningClient, setReassigningClient] = useState<ClienteGuardado | null>(null);
+    const [searchAdvisorText, setSearchAdvisorText] = useState("");
+    const filteredAdvisors = useMemo(() => {
+        const q = searchAdvisorText.trim().toLowerCase();
+        if (!q) return equipoLider;
+        return equipoLider.filter((m) => m.nombre.toLowerCase().includes(q));
+    }, [equipoLider, searchAdvisorText]);
+    const pendingCount = useMemo(
+        () => listaClientes.filter((c) => !c.sincronizado).length,
+        [listaClientes]
+    );
 
     // --- ESTADO NOTAS DE VERSIÓN ---
 
@@ -472,7 +483,12 @@ export default function TableroCopiaScreen() {
                         <View style={{ marginTop: 15, width: '100%', flexDirection: 'row', justifyContent: 'center' }}>
                             <TouchableOpacity
                                 style={[styles.btnAction, { backgroundColor: COLORS.azul1, borderWidth: 1, borderColor: '#1e3a8a' }]}
-                                onPress={() => setModalAsesoresVisible(true)}
+                                onPress={() => {
+                                    setReassigningClient(null);
+                                    setSearchAdvisorText("");
+                                    setModalAsesoresVisible(true);
+                                    verificarLider();
+                                }}
                             >
                                 <FontAwesome name="group" size={16} color="#fff" style={{ marginRight: 8 }} />
                                 <Text style={styles.btnText1}>Nuevo ADN para otro asesor</Text>
@@ -518,10 +534,22 @@ export default function TableroCopiaScreen() {
                                     <TextInput style={styles.searchInput} placeholder="Buscar..." placeholderTextColor="#9ca3af" value={searchText} onChangeText={setSearchText} />
                                     {searchText.length > 0 && <TouchableOpacity onPress={() => setSearchText("")}><FontAwesome name="times-circle" size={16} color="#9ca3af" style={{ marginRight: 10 }} /></TouchableOpacity>}
                                 </View>
-                                {/* <TouchableOpacity style={[styles.exportBtn, { marginLeft: 10, backgroundColor: COLORS.azul2 }]} onPress={forceSync}>
-                                    <FontAwesome name="refresh" size={14} color="#fff" />
-                                    <Text style={styles.exportBtnText}>Sincronizar</Text>
-                                </TouchableOpacity> */}
+                                {!advisor?.training && pendingCount > 0 && (
+                                    <TouchableOpacity
+                                        style={[styles.exportBtn, { marginLeft: 10, backgroundColor: COLORS.nubePending, opacity: syncStatus === 'syncing' ? 0.7 : 1 }]}
+                                        onPress={() => forceSync()}
+                                        disabled={syncStatus === 'syncing'}
+                                    >
+                                        {syncStatus === 'syncing' ? (
+                                            <ActivityIndicator size="small" color="#fff" />
+                                        ) : (
+                                            <FontAwesome name="refresh" size={14} color="#fff" />
+                                        )}
+                                        <Text style={styles.exportBtnText}>
+                                            {syncStatus === 'syncing' ? "Subiendo..." : `Sincronizar (${pendingCount})`}
+                                        </Text>
+                                    </TouchableOpacity>
+                                )}
                                 {!advisor?.training && (
                                     <TouchableOpacity
                                         style={[styles.exportBtn, { marginLeft: 10, backgroundColor: COLORS.azul2, opacity: isFetchingCloud ? 0.7 : 1 }]}
@@ -562,7 +590,23 @@ export default function TableroCopiaScreen() {
                             )}
 
                             {currentItems.map((cliente, index) => (
-                                <AnimatedClientRow key={cliente.id} cliente={cliente} index={index} onLoad={handleCargar} onDelete={handleBorrar} onAbrirModalEstado={abrirModalEstado} isLider={isLider} isTraining={!!advisor?.training} onActualizarAcompanamiento={actualizarAcompanamiento} />
+                                <AnimatedClientRow
+                                    key={cliente.id}
+                                    cliente={cliente}
+                                    index={index}
+                                    onLoad={handleCargar}
+                                    onDelete={handleBorrar}
+                                    onAbrirModalEstado={abrirModalEstado}
+                                    isLider={isLider}
+                                    isTraining={!!advisor?.training}
+                                    onActualizarAcompanamiento={actualizarAcompanamiento}
+                                    onReasignarAsesor={(c: ClienteGuardado) => {
+                                        setReassigningClient(c);
+                                        setSearchAdvisorText("");
+                                        setModalAsesoresVisible(true);
+                                        verificarLider();
+                                    }}
+                                />
                             ))}
 
                             {totalPages > 1 && (
@@ -829,42 +873,113 @@ export default function TableroCopiaScreen() {
                 </View>
             </Modal>
 
-            {/* MODAL SELECCIÓN ASESOR */}
+            {/* MODAL SELECCIÓN ASESOR (API v16: GET /api/profile-advisors) */}
             <Modal visible={modalAsesoresVisible} animationType="fade" transparent>
                 <View style={styles.modalOverlay}>
                     <View style={[styles.modalContent, { padding: 25, alignItems: 'center' }]}>
                         <View style={{ width: 60, height: 60, borderRadius: 30, backgroundColor: '#e0f2fe', justifyContent: 'center', alignItems: 'center', marginBottom: 20 }}>
                             <FontAwesome name="group" size={28} color={COLORS.azul1} />
                         </View>
-                        <Text style={{ fontSize: 18, fontWeight: 'bold', color: COLORS.negro, marginBottom: 5 }}>Seleccionar Asesor</Text>
-                        <Text style={{ fontSize: 13, color: COLORS.textoGris, textAlign: 'center', marginBottom: 20 }}>Elige un asesor de tu equipo para este nuevo ADN</Text>
+                        <Text style={{ fontSize: 18, fontWeight: 'bold', color: COLORS.negro, marginBottom: 5 }}>
+                            {reassigningClient ? 'Cambiar Asesor del ADN' : 'Seleccionar Asesor'}
+                        </Text>
+                        <Text style={{ fontSize: 13, color: COLORS.textoGris, textAlign: 'center', marginBottom: 15 }}>
+                            {reassigningClient
+                                ? `Reasigna "${reassigningClient.nombre}" a otro asesor o guárdalo como propio`
+                                : 'Elige un asesor para este nuevo ADN'}
+                        </Text>
 
-                        <View style={{ width: '100%', maxHeight: 200, marginBottom: 20 }}>
-                            <CustomScrollView>
-                                {equipoLider.map((miembro: any) => (
-                                    <TouchableOpacity
-                                        key={miembro.id}
-                                        style={[{ width: '100%', padding: 15, borderRadius: 10, backgroundColor: COLORS.grisInput, marginBottom: 10, flexDirection: 'row', alignItems: 'center' }, asesorSeleccionadoGlobal?.id === miembro.id && { backgroundColor: COLORS.azul1 }]}
-                                        onPress={() => {
-                                            setModalAsesoresVisible(false);
-                                            setTimeout(() => {
-                                                confirmarAccion(`¿Iniciar un nuevo prospecto para ${miembro.nombre}?`, () => {
-                                                    setAsesorSeleccionadoGlobal(miembro);
-                                                    nuevoAnalisis();
-                                                });
-                                            }, 150); // Pequeño delay para asegurar que el primer Modal termine de cerrarse
-                                        }}
-                                    >
-                                        <FontAwesome name="user" size={16} color={asesorSeleccionadoGlobal?.id === miembro.id ? '#fff' : COLORS.textoGris} style={{ marginRight: 15 }} />
-                                        <Text style={[{ fontSize: 15, fontWeight: '600', color: COLORS.negro }, asesorSeleccionadoGlobal?.id === miembro.id && { color: '#fff' }]}>{miembro.nombre}</Text>
+                        {reassigningClient && (
+                            <TouchableOpacity
+                                style={{ width: '100%', padding: 13, borderRadius: 10, backgroundColor: '#eff6ff', borderWidth: 1, borderColor: '#bfdbfe', marginBottom: 12, flexDirection: 'row', alignItems: 'center' }}
+                                onPress={() => {
+                                    const targetId = reassigningClient.id;
+                                    setModalAsesoresVisible(false);
+                                    setReassigningClient(null);
+                                    actualizarAsesorProspecto(targetId, null);
+                                }}
+                            >
+                                <FontAwesome name="user-circle" size={16} color={COLORS.azul1} style={{ marginRight: 12 }} />
+                                <Text style={{ fontSize: 14, fontWeight: '700', color: COLORS.azul1 }}>
+                                    Asignar a mí mismo (quitar otro asesor)
+                                </Text>
+                            </TouchableOpacity>
+                        )}
+
+                        {equipoLider.length > 0 && (
+                            <View style={[styles.searchInputWrapper, { width: '100%', marginBottom: 12, height: 42 }]}>
+                                <FontAwesome name="search" size={14} color="#9ca3af" style={{ marginLeft: 12 }} />
+                                <TextInput
+                                    style={styles.searchInput}
+                                    placeholder="Buscar asesor..."
+                                    placeholderTextColor="#9ca3af"
+                                    value={searchAdvisorText}
+                                    onChangeText={setSearchAdvisorText}
+                                />
+                                {searchAdvisorText.length > 0 && (
+                                    <TouchableOpacity onPress={() => setSearchAdvisorText("")}>
+                                        <FontAwesome name="times-circle" size={15} color="#9ca3af" style={{ marginRight: 10 }} />
                                     </TouchableOpacity>
-                                ))}
-                            </CustomScrollView>
+                                )}
+                            </View>
+                        )}
+
+                        <View style={{ width: '100%', maxHeight: 300, marginBottom: 20 }}>
+                            {equipoLider.length === 0 ? (
+                                <View style={{ alignItems: 'center', paddingVertical: 20 }}>
+                                    <Text style={{ fontSize: 13, color: COLORS.textoGris, textAlign: 'center', marginBottom: 12 }}>
+                                        No se encontraron asesores disponibles.
+                                    </Text>
+                                    <TouchableOpacity
+                                        style={{ paddingVertical: 8, paddingHorizontal: 16, borderRadius: 10, backgroundColor: '#e0f2fe' }}
+                                        onPress={() => verificarLider()}
+                                    >
+                                        <Text style={{ fontSize: 13, fontWeight: 'bold', color: COLORS.azul1 }}>Reintentar</Text>
+                                    </TouchableOpacity>
+                                </View>
+                            ) : filteredAdvisors.length === 0 ? (
+                                <View style={{ alignItems: 'center', paddingVertical: 20 }}>
+                                    <Text style={{ fontSize: 13, color: COLORS.textoGris, textAlign: 'center' }}>
+                                        No hay coincidencias para "{searchAdvisorText}".
+                                    </Text>
+                                </View>
+                            ) : (
+                                <CustomScrollView>
+                                    {filteredAdvisors.map((miembro: any) => (
+                                        <TouchableOpacity
+                                            key={miembro.id}
+                                            style={[{ width: '100%', padding: 15, borderRadius: 10, backgroundColor: COLORS.grisInput, marginBottom: 10, flexDirection: 'row', alignItems: 'center' }, (reassigningClient ? reassigningClient.asesorAsignado?.id === miembro.id : asesorSeleccionadoGlobal?.id === miembro.id) && { backgroundColor: COLORS.azul1 }]}
+                                            onPress={() => {
+                                                if (reassigningClient) {
+                                                    const targetId = reassigningClient.id;
+                                                    setModalAsesoresVisible(false);
+                                                    setReassigningClient(null);
+                                                    actualizarAsesorProspecto(targetId, miembro);
+                                                    return;
+                                                }
+                                                setModalAsesoresVisible(false);
+                                                setTimeout(() => {
+                                                    confirmarAccion(`¿Iniciar un nuevo prospecto para ${miembro.nombre}?`, () => {
+                                                        setAsesorSeleccionadoGlobal(miembro);
+                                                        nuevoAnalisis();
+                                                    });
+                                                }, 150); // Pequeño delay para asegurar que el primer Modal termine de cerrarse
+                                            }}
+                                        >
+                                            <FontAwesome name="user" size={16} color={(reassigningClient ? reassigningClient.asesorAsignado?.id === miembro.id : asesorSeleccionadoGlobal?.id === miembro.id) ? '#fff' : COLORS.textoGris} style={{ marginRight: 15 }} />
+                                            <Text style={[{ fontSize: 15, fontWeight: '600', color: COLORS.negro }, (reassigningClient ? reassigningClient.asesorAsignado?.id === miembro.id : asesorSeleccionadoGlobal?.id === miembro.id) && { color: '#fff' }]}>{miembro.nombre}</Text>
+                                        </TouchableOpacity>
+                                    ))}
+                                </CustomScrollView>
+                            )}
                         </View>
 
                         <TouchableOpacity
                             style={{ width: '100%', paddingVertical: 14, borderRadius: 12, backgroundColor: '#f3f4f6', alignItems: 'center' }}
-                            onPress={() => setModalAsesoresVisible(false)}>
+                            onPress={() => {
+                                setModalAsesoresVisible(false);
+                                setReassigningClient(null);
+                            }}>
                             <Text style={{ fontWeight: 'bold', color: COLORS.textoGris, fontSize: 15 }}>Cancelar</Text>
                         </TouchableOpacity>
                     </View>
@@ -886,7 +1001,7 @@ export default function TableroCopiaScreen() {
 }
 
 // --- ROW COMPONENT (ACTUALIZADO 3 ESTADOS) ---
-const AnimatedClientRow = ({ cliente, index, onLoad, onDelete, onAbrirModalEstado, isLider, isTraining, onActualizarAcompanamiento }: any) => {
+const AnimatedClientRow = ({ cliente, index, onLoad, onDelete, onAbrirModalEstado, isLider, isTraining, onActualizarAcompanamiento, onReasignarAsesor }: any) => {
     const rowOp = useRef(new Animated.Value(0)).current;
     useEffect(() => { Animated.timing(rowOp, { toValue: 1, duration: 400, delay: index * 50, useNativeDriver: Platform.OS !== 'web' }).start(); }, []);
 
@@ -979,14 +1094,28 @@ const AnimatedClientRow = ({ cliente, index, onLoad, onDelete, onAbrirModalEstad
                                 </View>
                             )}
 
-                            {/* VISUAL: Mostrar el asesor asignado si es líder (Desde BD/Contexto) */}
+                            {/* VISUAL: Mostrar el asesor asignado si es líder (editable si aún no sincroniza) */}
                             {isLider && cliente.asesorAsignado && (
-                                <View style={{ backgroundColor: '#f3f4f6', paddingHorizontal: 6, paddingVertical: 2, borderRadius: 4, marginLeft: 8, flexDirection: 'row', alignItems: 'center', borderWidth: 1, borderColor: '#e5e7eb' }}>
-                                    <FontAwesome name="user" size={10} color={COLORS.textoGris} style={{ marginRight: 4 }} />
-                                    <Text style={{ fontSize: 10, color: COLORS.textoGris, fontStyle: 'italic', fontWeight: 'bold' }}>
-                                        hecho para: {cliente.asesorAsignado.nombre}
-                                    </Text>
-                                </View>
+                                !cliente.sincronizado && !cliente.serverId && onReasignarAsesor ? (
+                                    <TouchableOpacity
+                                        onPress={() => onReasignarAsesor(cliente)}
+                                        activeOpacity={0.7}
+                                        style={{ backgroundColor: '#eff6ff', paddingHorizontal: 6, paddingVertical: 2, borderRadius: 4, marginLeft: 8, flexDirection: 'row', alignItems: 'center', borderWidth: 1, borderColor: '#bfdbfe' }}
+                                    >
+                                        <FontAwesome name="user" size={10} color={COLORS.azul1} style={{ marginRight: 4 }} />
+                                        <Text style={{ fontSize: 10, color: COLORS.azul1, fontStyle: 'italic', fontWeight: 'bold' }}>
+                                            hecho para: {cliente.asesorAsignado.nombre}
+                                        </Text>
+                                        <FontAwesome name="pencil" size={9} color={COLORS.azul1} style={{ marginLeft: 4 }} />
+                                    </TouchableOpacity>
+                                ) : (
+                                    <View style={{ backgroundColor: '#f3f4f6', paddingHorizontal: 6, paddingVertical: 2, borderRadius: 4, marginLeft: 8, flexDirection: 'row', alignItems: 'center', borderWidth: 1, borderColor: '#e5e7eb' }}>
+                                        <FontAwesome name="user" size={10} color={COLORS.textoGris} style={{ marginRight: 4 }} />
+                                        <Text style={{ fontSize: 10, color: COLORS.textoGris, fontStyle: 'italic', fontWeight: 'bold' }}>
+                                            hecho para: {cliente.asesorAsignado.nombre}
+                                        </Text>
+                                    </View>
+                                )
                             )}
 
                             {/* VISUAL: Mostrar quién creó el ADN si fue un líder (Para el asesor) */}

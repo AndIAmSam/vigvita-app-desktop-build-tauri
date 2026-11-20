@@ -386,4 +386,142 @@ describe('Data Mapping — Roundtrip map↔unmap', () => {
     expect(ctx.hijos[0].nombre).toBe('Carlitos');
     expect(ctx.hijos[0].universidad).toBe('Unitec');
   });
+
+  it('Contrato estricto API Desktop v16: solo llaves documentadas (cero 400) y tipos JSON exactos (cero 422)', async () => {
+    let capturedPayload: any = null;
+    const generatedUuid = '10203040-5060-4780-90a0-b0c0d0e0f000';
+
+    global.fetch = jest.fn((url: string, opts?: any) => {
+      if (opts?.method === 'POST' && url.includes('/api/profiles/new')) {
+        capturedPayload = JSON.parse(opts.body);
+        return Promise.resolve({
+          ok: true,
+          status: 201,
+          json: () => Promise.resolve({ data: [generatedUuid] }),
+        });
+      }
+      if (url.includes(generatedUuid)) {
+        return Promise.resolve({
+          ok: true,
+          status: 200,
+          json: () => Promise.resolve({ data: JSON.stringify(capturedPayload?.clients?.[0]?.data || {}) }),
+        });
+      }
+      return Promise.resolve({ ok: true, status: 200, json: () => Promise.resolve({ profiles: [] }) });
+    }) as jest.Mock;
+
+    const mockStorage = require('@react-native-async-storage/async-storage');
+    mockStorage.getItem.mockImplementation(async (key: string) => {
+      if (key === 'advisor_session') return JSON.stringify(FIXTURES.SESSION());
+      return null;
+    });
+
+    root.unmount();
+    root = await mountProvider();
+    await act(async () => { jest.runAllTimers(); });
+
+    const clientData = FIXTURES.FULL_CLIENT_DATA();
+    // Inyectar decimales en campos integer y sublabel extra en piramide para validar sanitización
+    clientData.jubilacion.edadActual = '34.6';
+    clientData.jubilacion.edadRetiro = '65.2';
+    clientData.jubilacion.esperanzaVida = '85.9';
+    clientData.perfil.dependientes[0].edad = '5.4';
+    clientData.hijos[0].edad = '5.7';
+    clientData.hijos[0].yearsFaltantes = 12.8;
+    clientData.referidos[0].edad = '40.3';
+    (clientData.piramideLevels[0] as any).sublabel = '(Protección Familiar)';
+
+    await act(async () => {
+      await ctx.cargarProspecto(
+        FIXTURES.SAVED_CLIENT({
+          id: 'strict-local',
+          serverId: undefined,
+          nombre: 'José María Rodríguez Peña',
+          data: clientData,
+        })
+      );
+    });
+    await act(async () => {
+      await ctx.guardarProspecto('cierre', ['Vida'], 'observation');
+    });
+    await act(async () => { jest.runAllTimers(); });
+
+    expect(capturedPayload).toBeDefined();
+    expect(Object.keys(capturedPayload)).toEqual(['clients']);
+
+    const client = capturedPayload.clients[0];
+    const allowedTopKeys = new Set([
+      'id',
+      'advisor_id',
+      'name',
+      'acquisition_status',
+      'accompaniment_status',
+      'closing_types',
+      'data',
+    ]);
+    for (const k of Object.keys(client)) {
+      expect(allowedTopKeys.has(k)).toBe(true);
+    }
+    expect(client.is_closed).toBeUndefined();
+    expect(client.created_at).toBeUndefined();
+
+    const d = client.data;
+    const allowedDataKeys = new Set([
+      'profile',
+      'children',
+      'retirement',
+      'assets',
+      'liabilities',
+      'insurance',
+      'income',
+      'fixed_expenses',
+      'variable_expenses',
+      'death_expenses',
+      'plan_details',
+      'appointment',
+      'referrals',
+      'notes',
+      'priority_levels',
+    ]);
+    expect(new Set(Object.keys(d))).toEqual(allowedDataKeys);
+
+    // Verificar tipos `integer` estrictos (todos Number.isInteger)
+    expect(Number.isInteger(d.retirement.life_expectancy)).toBe(true);
+    expect(Number.isInteger(d.retirement.retirement_age)).toBe(true);
+    expect(Number.isInteger(d.retirement.current_age)).toBe(true);
+    expect(Number.isInteger(d.profile.dependents[0].age)).toBe(true);
+    expect(Number.isInteger(d.children[0].age)).toBe(true);
+    expect(Number.isInteger(d.children[0].years_remaining)).toBe(true);
+    expect(Number.isInteger(d.referrals[0].age)).toBe(true);
+
+    // Verificar ausencia de `sublabel` o campos extra en priority_levels y dependents/children
+    for (const lvl of d.priority_levels) {
+      expect(Object.keys(lvl).sort()).toEqual(['color', 'icon', 'id', 'label']);
+    }
+    for (const dep of d.profile.dependents) {
+      expect(Object.keys(dep).sort()).toEqual(['age', 'name', 'notes', 'relationship']);
+    }
+    for (const ch of d.children) {
+      expect(Object.keys(ch).sort()).toEqual([
+        'age',
+        'annual_savings',
+        'name',
+        'projected_cost',
+        'university',
+        'years_remaining',
+      ]);
+    }
+    for (const ref of d.referrals) {
+      expect(Object.keys(ref).sort()).toEqual([
+        'age',
+        'circle',
+        'family_group',
+        'marital_status',
+        'name',
+        'notes',
+        'occupation',
+        'phone',
+      ]);
+    }
+  });
 });

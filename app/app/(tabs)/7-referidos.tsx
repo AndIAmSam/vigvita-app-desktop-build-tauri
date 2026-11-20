@@ -4,6 +4,7 @@ import { View, Text, ScrollView, TextInput, StyleSheet, TouchableOpacity, Activi
 import { FontAwesome } from '@expo/vector-icons';
 import { useFinancialData, Referido } from '../../context/FinancialContext';
 import { generatePDF } from '../../utils/pdfGenerator';
+import { truncateToUtf8Bytes } from '../../utils/utf8';
 
 // --- COLORES DE MARCA ---
 const COLORS = {
@@ -288,7 +289,7 @@ export default function ReferidosScreen() {
                               <TextInput
                                 style={[styles.tdInput, styles.colNotas]}
                                 value={getRowValue(env, idx, 'notas')}
-                                onChangeText={(t) => handleUpdateRow(env, idx, 'notas', t)}
+                                onChangeText={(t) => handleUpdateRow(env, idx, 'notas', truncateToUtf8Bytes(t, 255))}
                                 placeholder="Notas"
                                 maxLength={255}
                               />

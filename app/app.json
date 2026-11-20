@@ -2,7 +2,7 @@
   "expo": {
     "name": "vigvita-app",
     "slug": "vigvita-app",
-    "version": "1.0.1",
+    "version": "1.0.3",
     "orientation": "portrait",
     "icon": "./assets/AppIcon.png",
     "scheme": "vigvitaapp",

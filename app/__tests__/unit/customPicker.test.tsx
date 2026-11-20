@@ -16,6 +16,12 @@ const items = [
 ];
 
 describe('CustomPicker Component', () => {
+  const origPlatform = Platform.OS;
+
+  afterEach(() => {
+    Platform.OS = origPlatform;
+  });
+
   it('Renderiza correctamente en Web/Android con el Picker nativo', () => {
     Platform.OS = 'android';
     const onValueChange = jest.fn();

@@ -11,6 +11,22 @@ import AsyncStorage from "@react-native-async-storage/async-storage";
 import localforage from "localforage";
 import { Logger } from "../utils/logger";
 import { LISTA_UNIVERSIDADES, getCostoUniversidad } from "../constants/UniversityData";
+import {
+  getUtf8ByteLength,
+  truncateToUtf8Bytes,
+  isValidUuid,
+  parseIntSafe,
+  parseFloatSafe,
+  toSafeString,
+} from "../utils/utf8";
+import {
+  apiFetch,
+  safeReadResponseBody,
+  isProfilesNewAuthFailure,
+  parse422Error,
+  SAFE_BATCH_BODY_BYTES,
+  MAX_REQUEST_BODY_BYTES,
+} from "../utils/apiClient";
 
 const storage = {
   getItem: async <T = string>(key: string): Promise<T | null> => {
@@ -332,6 +348,10 @@ interface FinancialData {
     id: string,
     status: "unaccompanied" | "observation" | "demonstration"
   ) => Promise<void>;
+  actualizarAsesorProspecto: (
+    id: string,
+    nuevoAsesor: { id: string; nombre: string } | null
+  ) => Promise<void>;
 
   // Respaldo
   importarRespaldo: (
@@ -451,16 +471,115 @@ export const FinancialProvider = ({ children }: { children: ReactNode }) => {
   // GLOBAL STATES
   const [isInitialized, setIsInitialized] = useState(false);
   const [advisor, setAdvisor] = useState<Advisor | null>(null);
+  const advisorRef = useRef<Advisor | null>(null);
+  advisorRef.current = advisor;
   const [userName, setUserName] = useState(""); // Nombre visual (legacy)
 
-  // LÍDER DE EQUIPO
+  // LÍDER DE EQUIPO / SUPERADMIN (API v16: /api/profile-advisors)
   const [isLider, setIsLider] = useState(false);
-  const [equipoLider, setEquipoLider] = useState<{ id: string, nombre: string }[]>([]);
-  const [asesorSeleccionadoGlobal, setAsesorSeleccionadoGlobal] = useState<{ id: string, nombre: string } | null>(null);
+  const [equipoLider, setEquipoLider] = useState<{ id: string; nombre: string }[]>([]);
+  const [asesorSeleccionadoGlobal, setAsesorSeleccionadoGlobal] = useState<{ id: string; nombre: string } | null>(null);
+  const equipoLiderRef = useRef<{ id: string; nombre: string }[]>([]);
+  const advisorsDirectoryRef = useRef<Record<string, string>>({});
+  const adnAdvisorMapRef = useRef<Record<string, { id: string; nombre: string }>>({});
+  const accessExpiresAtRef = useRef<string | null>(null);
+
+  const normalizeAdvisorName = (s?: string): string =>
+    (s || "").trim().toLowerCase().replace(/\s+/g, " ");
+
+  const updateEquipoLider = (list: { id: string; nombre: string }[]) => {
+    equipoLiderRef.current = list;
+    setEquipoLider(list);
+
+    if (list.length > 0) {
+      let dirChanged = false;
+      const nextDir = { ...advisorsDirectoryRef.current };
+      for (const item of list) {
+        if (item.id && item.nombre && nextDir[item.nombre] !== item.id) {
+          nextDir[item.nombre] = item.id;
+          dirChanged = true;
+        }
+      }
+      if (dirChanged) {
+        advisorsDirectoryRef.current = nextDir;
+        storage.setItem("advisors_directory_cache", JSON.stringify(nextDir)).catch(console.error);
+      }
+    }
+  };
+
+  const rememberAdnAdvisor = (
+    serverId: string | undefined,
+    asesor?: { id: string; nombre: string }
+  ) => {
+    if (!serverId || !asesor?.id) return;
+    const prev = adnAdvisorMapRef.current[serverId];
+    if (prev && prev.id === asesor.id && prev.nombre === asesor.nombre) return;
+    const nextMap = {
+      ...adnAdvisorMapRef.current,
+      [serverId]: { id: asesor.id, nombre: asesor.nombre },
+    };
+    adnAdvisorMapRef.current = nextMap;
+    storage.setItem("adn_advisor_map", JSON.stringify(nextMap)).catch(console.error);
+  };
+
+  const resolveAdvisorId = (
+    nombre?: string,
+    serverId?: string,
+    currentId?: string
+  ): string => {
+    if (isValidUuid(currentId)) {
+      const trimmed = currentId.trim();
+      // Auto-reparación: si el UUID guardado ya no aparece en /api/profile-advisors pero
+      // el mismo nombre aparece de forma única en la lista activa, usar el UUID vigente.
+      // Si el nombre NO está en la lista activa (ej. excepción SuperAdmin para asesor expirado),
+      // se preserva el UUID original.
+      if (
+        equipoLiderRef.current.length > 0 &&
+        !equipoLiderRef.current.some((a) => a.id === trimmed) &&
+        nombre
+      ) {
+        const normTarget = normalizeAdvisorName(nombre);
+        const matches = equipoLiderRef.current.filter(
+          (a) => normalizeAdvisorName(a.nombre) === normTarget && isValidUuid(a.id)
+        );
+        if (matches.length === 1) {
+          return matches[0].id.trim();
+        }
+      }
+      return trimmed;
+    }
+    if (serverId) {
+      const mapped = adnAdvisorMapRef.current[serverId];
+      if (mapped?.id && isValidUuid(mapped.id)) return mapped.id.trim();
+      if (mapped?.id && !currentId) return mapped.id;
+    }
+    if (nombre) {
+      const normTarget = normalizeAdvisorName(nombre);
+      const activeMatch = equipoLiderRef.current.find(
+        (a) => normalizeAdvisorName(a.nombre) === normTarget
+      );
+      if (activeMatch?.id) return activeMatch.id;
+      const cachedId = advisorsDirectoryRef.current[nombre];
+      if (cachedId) return cachedId;
+    }
+    return currentId || "";
+  };
+
+  const hydrateAsesorAsignado = (
+    asesor?: { id: string; nombre: string },
+    serverId?: string
+  ): { id: string; nombre: string } | undefined => {
+    if (!asesor) return undefined;
+    const resolvedId = resolveAdvisorId(asesor.nombre, serverId, asesor.id);
+    if (resolvedId === asesor.id) return asesor;
+    return { id: resolvedId, nombre: asesor.nombre };
+  };
 
   // CRM
   const [nombreCliente, setNombreCliente] = useState("");
   const [listaClientes, setListaClientes] = useState<ClienteGuardado[]>([]);
+  const listaClientesRef = useRef<ClienteGuardado[]>([]);
+  listaClientesRef.current = listaClientes;
   const [currentClientId, setCurrentClientId] = useState<string | null>(null);
   const [currentServerId, setCurrentServerId] = useState<string | null>(null);
   const [listaNube, setListaNube] = useState<ClienteGuardado[]>([]);
@@ -523,6 +642,7 @@ export const FinancialProvider = ({ children }: { children: ReactNode }) => {
     const snapshot = {
       currentClientId,
       currentServerId,
+      asesorSeleccionadoGlobal,
       nombreCliente,
       perfil,
       hijos,
@@ -549,6 +669,7 @@ export const FinancialProvider = ({ children }: { children: ReactNode }) => {
   }, [
     isInitialized,
     currentClientId,
+    asesorSeleccionadoGlobal,
     nombreCliente,
     perfil,
     hijos,
@@ -596,9 +717,16 @@ export const FinancialProvider = ({ children }: { children: ReactNode }) => {
   }, [listaClientes, isOnline]);
 
   // AUTO SYNC SOLO AL RECUPERAR CONEXIÓN
-  // (Previene loops infinitos si la red rechaza los prospectos repetidamente)
+  // (Previene loops infinitos si la red rechaza los prospectos repetidamente,
+  //  y nunca dispara peticiones sin sesión autenticada)
   useEffect(() => {
-    if (isOnline) {
+    const curAdvisor = advisorRef.current;
+    if (
+      isOnline &&
+      curAdvisor?.token &&
+      !curAdvisor.training &&
+      curAdvisor.id !== "DEV-MODE"
+    ) {
       setListaClientes((currentList) => {
         const hayPendientes = currentList.some((c) => !c.sincronizado);
         if (hayPendientes) {
@@ -612,11 +740,17 @@ export const FinancialProvider = ({ children }: { children: ReactNode }) => {
     }
   }, [isOnline]);
 
-  // AppState Listener para sincronizar al volver del background
+  // AppState Listener para sincronizar al volver del background (solo con sesión activa)
   useEffect(() => {
     const subscription = AppState.addEventListener("change", (nextAppState) => {
-      if (nextAppState === "active" && isOnline) {
-        const hayPendientes = listaClientes.some((c) => !c.sincronizado);
+      if (
+        nextAppState === "active" &&
+        isOnline &&
+        advisor?.token &&
+        !advisor.training &&
+        advisor.id !== "DEV-MODE"
+      ) {
+        const hayPendientes = listaClientesRef.current.some((c) => !c.sincronizado);
         if (hayPendientes) {
           setSyncStatus("pending");
           forceSync().catch((err) => console.warn("Background auto-sync error:", err));
@@ -627,22 +761,28 @@ export const FinancialProvider = ({ children }: { children: ReactNode }) => {
     return () => {
       subscription.remove();
     };
-  }, [listaClientes, isOnline]);
+  }, [listaClientes, isOnline, advisor]);
 
-  // AUTO SYNC AL INICIAR LA APP (Cold Boot)
+  // AUTO SYNC AL INICIAR LA APP (Cold Boot) Y TRAS INICIAR SESIÓN (Post-Login)
   useEffect(() => {
-    if (isInitialized && isOnline) {
-      const hayPendientes = listaClientes.some((c) => !c.sincronizado);
+    if (
+      isInitialized &&
+      isOnline &&
+      advisor?.token &&
+      !advisor.training &&
+      advisor.id !== "DEV-MODE"
+    ) {
+      const hayPendientes = listaClientesRef.current.some((c) => !c.sincronizado);
       if (hayPendientes) {
         setSyncStatus("pending");
-        // Pequeño retraso para evitar sobrecargar el arranque
+        // Pequeño retraso para evitar sobrecargar el arranque y permitir cargar /api/profile-advisors
         const timer = setTimeout(() => {
-          forceSync().catch((err) => console.warn("Init auto-sync error:", err));
+          forceSync().catch((err) => console.warn("Init/Login auto-sync error:", err));
         }, 3000);
         return () => clearTimeout(timer);
       }
     }
-  }, [isInitialized]);
+  }, [isInitialized, advisor?.token]);
 
   // --- HELPER: Convierte fecha DD/MM/AAAA a edad (Num) ---
   const calculateAgeNumber = (dateString: string): string => {
@@ -791,80 +931,73 @@ export const FinancialProvider = ({ children }: { children: ReactNode }) => {
     });
   }, [perfil.dependientes, isInitialized]);
 
-  // --- HELPER: Convierte strings a números. Si es vacío o no válido, devuelve 0 ---
-  const parseNum = (val: any): number => {
-    if (!val) return 0;
-    const num = Number(val);
-    if (isNaN(num)) return 0;
-    // Redondeamos a 2 decimales máximo para probar si la API los acepta (ej. 785062.97)
-    return Math.round(num * 100) / 100;
-  };
-
-  // --- HELPER: Mapeo de campos español → inglés para el payload ---
+  // --- HELPER: Mapeo de campos español → inglés para el payload (API Desktop v16) ---
+  // Garantiza tipos JSON estrictos (integer vs number, boolean, string), allowlist exacto
+  // sin campos desconocidos (evita 400) y límites UTF-8 en bytes (referrals[].notes <= 255B).
   const mapInsuranceItem = (item: any) => ({
-    company: item?.compania || "",
-    plan: item?.plan || "",
-    coverage_amount: parseNum(item?.sumaAsegurada),
-    premium: parseNum(item?.prima),
+    company: toSafeString(item?.compania),
+    plan: toSafeString(item?.plan),
+    coverage_amount: parseFloatSafe(item?.sumaAsegurada),
+    premium: parseFloatSafe(item?.prima),
   });
 
   const mapClientData = (data: any) => ({
     profile: {
-      phone: data.perfil?.telefono || "",
-      occupation: data.perfil?.ocupacion || "",
-      hobbies: data.perfil?.hobbies || "",
-      sport: data.perfil?.deporte || "",
-      smoker: data.perfil?.fuma || false,
-      birth_date: data.perfil?.fechaNacimiento || "",
-      marital_status: data.perfil?.estadoCivil || "",
-      spouse_name: data.perfil?.conyugeNombre || "",
-      spouse_phone: data.perfil?.conyugeTelefono || "",
-      spouse_birth_date: data.perfil?.conyugeFechaNacimiento || "",
-      spouse_occupation: data.perfil?.conyugeOcupacion || "",
-      spouse_smoker: data.perfil?.conyugeFuma || false,
-      spouse_hobbies: data.perfil?.conyugeHobbies || "",
-      spouse_sport: data.perfil?.conyugeDeporte || "",
+      phone: toSafeString(data.perfil?.telefono),
+      occupation: toSafeString(data.perfil?.ocupacion),
+      hobbies: toSafeString(data.perfil?.hobbies),
+      sport: toSafeString(data.perfil?.deporte),
+      smoker: Boolean(data.perfil?.fuma),
+      birth_date: toSafeString(data.perfil?.fechaNacimiento),
+      marital_status: toSafeString(data.perfil?.estadoCivil),
+      spouse_name: toSafeString(data.perfil?.conyugeNombre),
+      spouse_phone: toSafeString(data.perfil?.conyugeTelefono),
+      spouse_birth_date: toSafeString(data.perfil?.conyugeFechaNacimiento),
+      spouse_occupation: toSafeString(data.perfil?.conyugeOcupacion),
+      spouse_smoker: Boolean(data.perfil?.conyugeFuma),
+      spouse_hobbies: toSafeString(data.perfil?.conyugeHobbies),
+      spouse_sport: toSafeString(data.perfil?.conyugeDeporte),
       dependents: (data.perfil?.dependientes || []).map((d: any) => ({
-        name: d.nombre || "",
-        age: parseNum(d.edad),
-        relationship: d.parentesco || "",
-        notes: d.notas || "",
+        name: toSafeString(d?.nombre),
+        age: parseIntSafe(d?.edad),
+        relationship: toSafeString(d?.parentesco),
+        notes: toSafeString(d?.notas),
       })),
-      note_protection: data.perfil?.notaProteccion || "",
-      note_education: data.perfil?.notaEducacion || "",
-      note_savings: data.perfil?.notaAhorro || "",
-      note_retirement: data.perfil?.notaJubilacion || "",
-      note_health: data.perfil?.notaSalud || "",
-      note_risks: data.perfil?.notaRiesgos || "",
+      note_protection: toSafeString(data.perfil?.notaProteccion),
+      note_education: toSafeString(data.perfil?.notaEducacion),
+      note_savings: toSafeString(data.perfil?.notaAhorro),
+      note_retirement: toSafeString(data.perfil?.notaJubilacion),
+      note_health: toSafeString(data.perfil?.notaSalud),
+      note_risks: toSafeString(data.perfil?.notaRiesgos),
     },
     children: (data.hijos || []).map((h: any) => ({
-      name: h.nombre || "",
-      age: parseNum(h.edad),
-      university: h.universidad || "",
-      years_remaining: parseNum(h.yearsFaltantes),
-      projected_cost: parseNum(h.costoProyectado),
-      annual_savings: parseNum(h.ahorroAnual),
+      name: toSafeString(h?.nombre),
+      age: parseIntSafe(h?.edad),
+      university: toSafeString(h?.universidad),
+      years_remaining: parseIntSafe(h?.yearsFaltantes),
+      projected_cost: parseFloatSafe(h?.costoProyectado),
+      annual_savings: parseFloatSafe(h?.ahorroAnual),
     })),
     retirement: {
-      life_expectancy: parseNum(data.jubilacion?.esperanzaVida),
-      retirement_age: parseNum(data.jubilacion?.edadRetiro),
-      monthly_amount: parseNum(data.jubilacion?.montoMensual),
-      current_age: parseNum(data.jubilacion?.edadActual),
+      life_expectancy: parseIntSafe(data.jubilacion?.esperanzaVida),
+      retirement_age: parseIntSafe(data.jubilacion?.edadRetiro),
+      monthly_amount: parseFloatSafe(data.jubilacion?.montoMensual),
+      current_age: parseIntSafe(data.jubilacion?.edadActual),
     },
     assets: {
-      savings: parseNum(data.activos?.ahorros),
-      house: parseNum(data.activos?.casa),
-      other_properties: parseNum(data.activos?.otrosInmuebles),
-      vehicles: parseNum(data.activos?.vehiculos),
-      investments: parseNum(data.activos?.inversiones),
-      other: parseNum(data.activos?.otros),
+      savings: parseFloatSafe(data.activos?.ahorros),
+      house: parseFloatSafe(data.activos?.casa),
+      other_properties: parseFloatSafe(data.activos?.otrosInmuebles),
+      vehicles: parseFloatSafe(data.activos?.vehiculos),
+      investments: parseFloatSafe(data.activos?.inversiones),
+      other: parseFloatSafe(data.activos?.otros),
     },
     liabilities: {
-      mortgage: parseNum(data.pasivos?.hipoteca),
-      loans: parseNum(data.pasivos?.prestamos),
-      credit_cards: parseNum(data.pasivos?.tarjetas),
-      credit_limit: parseNum(data.pasivos?.limiteCredito),
-      other: parseNum(data.pasivos?.otros),
+      mortgage: parseFloatSafe(data.pasivos?.hipoteca),
+      loans: parseFloatSafe(data.pasivos?.prestamos),
+      credit_cards: parseFloatSafe(data.pasivos?.tarjetas),
+      credit_limit: parseFloatSafe(data.pasivos?.limiteCredito),
+      other: parseFloatSafe(data.pasivos?.otros),
     },
     insurance: {
       individual: mapInsuranceItem(data.seguros?.individual),
@@ -872,61 +1005,62 @@ export const FinancialProvider = ({ children }: { children: ReactNode }) => {
       other: mapInsuranceItem(data.seguros?.otros),
     },
     income: {
-      holder: parseNum(data.ingresos?.titular),
-      spouse: parseNum(data.ingresos?.conyuge),
-      holder_benefits: data.ingresos?.prestacionesTitular || "",
-      spouse_benefits: data.ingresos?.prestacionesConyuge || "",
+      holder: parseFloatSafe(data.ingresos?.titular),
+      spouse: parseFloatSafe(data.ingresos?.conyuge),
+      holder_benefits: toSafeString(data.ingresos?.prestacionesTitular),
+      spouse_benefits: toSafeString(data.ingresos?.prestacionesConyuge),
     },
     fixed_expenses: {
-      utilities: parseNum(data.gastosBasicos?.servicios),
-      housing: parseNum(data.gastosBasicos?.vivienda),
-      food: parseNum(data.gastosBasicos?.alimentacion),
-      schools: parseNum(data.gastosBasicos?.colegios),
-      transportation: parseNum(data.gastosBasicos?.transporte),
-      insurance: parseNum(data.gastosBasicos?.seguros),
+      utilities: parseFloatSafe(data.gastosBasicos?.servicios),
+      housing: parseFloatSafe(data.gastosBasicos?.vivienda),
+      food: parseFloatSafe(data.gastosBasicos?.alimentacion),
+      schools: parseFloatSafe(data.gastosBasicos?.colegios),
+      transportation: parseFloatSafe(data.gastosBasicos?.transporte),
+      insurance: parseFloatSafe(data.gastosBasicos?.seguros),
     },
     variable_expenses: {
-      credit_payments: parseNum(data.gastosVariables?.creditos),
-      recreation: parseNum(data.gastosVariables?.recreacion),
-      entertainment: parseNum(data.gastosVariables?.entretenimiento),
-      household: parseNum(data.gastosVariables?.domestico),
-      health: parseNum(data.gastosVariables?.salud),
-      other: parseNum(data.gastosVariables?.otros),
+      credit_payments: parseFloatSafe(data.gastosVariables?.creditos),
+      recreation: parseFloatSafe(data.gastosVariables?.recreacion),
+      entertainment: parseFloatSafe(data.gastosVariables?.entretenimiento),
+      household: parseFloatSafe(data.gastosVariables?.domestico),
+      health: parseFloatSafe(data.gastosVariables?.salud),
+      other: parseFloatSafe(data.gastosVariables?.otros),
     },
     death_expenses: {
-      funeral_costs: parseNum(data.fallecimiento?.gastosSepelio),
-      disability_costs: parseNum(data.fallecimiento?.gastosIncapacidad),
+      funeral_costs: parseFloatSafe(data.fallecimiento?.gastosSepelio),
+      disability_costs: parseFloatSafe(data.fallecimiento?.gastosIncapacidad),
     },
     plan_details: {
-      other_income: parseNum(data.detalle?.otrosIngresos),
-      interest_rate: parseNum(data.detalle?.tasaInteres),
-      protection_plan: parseNum(data.detalle?.planProteccion),
-      savings_plan: parseNum(data.detalle?.planAhorro),
+      other_income: parseFloatSafe(data.detalle?.otrosIngresos),
+      interest_rate: parseFloatSafe(data.detalle?.tasaInteres),
+      protection_plan: parseFloatSafe(data.detalle?.planProteccion),
+      savings_plan: parseFloatSafe(data.detalle?.planAhorro),
     },
     appointment: {
-      day: data.cita?.dia || "",
-      month: data.cita?.mes || "",
-      time: data.cita?.hora || "",
-      location: data.cita?.lugar || "",
-      needs_decision_maker: data.cita?.necesitaDecisionMaker || false,
-      decision_maker_name: data.cita?.nombreDecisionMaker || "",
+      day: toSafeString(data.cita?.dia),
+      month: toSafeString(data.cita?.mes),
+      time: toSafeString(data.cita?.hora),
+      location: toSafeString(data.cita?.lugar),
+      needs_decision_maker: Boolean(data.cita?.necesitaDecisionMaker),
+      decision_maker_name: toSafeString(data.cita?.nombreDecisionMaker),
     },
     referrals: (data.referidos || []).map((r: any) => ({
-      name: r.nombre || "",
-      age: parseNum(r.edad),
-      marital_status: r.estadoCivil || "",
-      occupation: r.ocupacion || "",
-      phone: r.telefono || "",
-      circle: r.entorno || "",
-      family_group: r.grupoFamiliar || "",
-      notes: r.notas || "",
+      name: toSafeString(r?.nombre),
+      age: parseIntSafe(r?.edad),
+      marital_status: toSafeString(r?.estadoCivil),
+      occupation: toSafeString(r?.ocupacion),
+      phone: toSafeString(r?.telefono),
+      circle: toSafeString(r?.entorno),
+      family_group: toSafeString(r?.grupoFamiliar),
+      // API v16: max 255 BYTES en UTF-8 (acentos cuentan doble)
+      notes: truncateToUtf8Bytes(toSafeString(r?.notas), 255),
     })),
-    notes: data.notas || "",
+    notes: toSafeString(data.notas),
     priority_levels: (data.piramideLevels || []).map((l: any) => ({
-      id: l.id,
-      label: l.label,
-      color: l.color,
-      icon: l.icon,
+      id: toSafeString(l?.id),
+      label: toSafeString(l?.label),
+      color: toSafeString(l?.color),
+      icon: toSafeString(l?.icon),
     })),
   });
 
@@ -1131,23 +1265,104 @@ export const FinancialProvider = ({ children }: { children: ReactNode }) => {
     };
   };
 
-  // --- SYNC COMO JSON PURO ---
+  // --- HELPER: Constructor único de payload para POST /api/profiles/new (API Desktop v16) ---
+  const VALID_ACCOMPANIMENT = new Set(["unaccompanied", "demonstration", "observation"]);
+
+  const buildClientPayloadEntry = (cliente: ClienteGuardado) => {
+    const localStatus =
+      cliente.estatusAdquisicion || (cliente.estatusCierre ? "cierre" : "en_espera");
+    let acqStatus: "pending" | "cancelled" | "completed" = "pending";
+    if (localStatus === "en_espera") acqStatus = "pending";
+    if (localStatus === "descartado") acqStatus = "cancelled";
+    if (localStatus === "cierre") acqStatus = "completed";
+
+    const rawAcomp = cliente.accompanimentStatus || "unaccompanied";
+    const accompanimentStatus = VALID_ACCOMPANIMENT.has(rawAcomp)
+      ? rawAcomp
+      : "unaccompanied";
+
+    const rawName = toSafeString(cliente.nombre).trim();
+    const safeName = truncateToUtf8Bytes(rawName, 100) || "Sin Nombre";
+
+    // API v16: solo enviar campos documentados activos (se omite `is_closed` y `created_at`
+    // porque el servidor confirma que no tienen efecto ni se almacenan).
+    const payloadClient: Record<string, any> = {
+      name: safeName,
+      acquisition_status: acqStatus,
+      accompaniment_status: accompanimentStatus,
+      closing_types: (
+        cliente.tiposCierre || (cliente.tipoCierre ? [cliente.tipoCierre] : [])
+      )
+        .map(toSafeString)
+        .filter((t) => t.length > 0),
+      data: mapClientData(cliente.data || {}),
+    };
+
+    // API v16: `id` debe ser un UUID bien formado; un string inválido causa 400 text/plain.
+    let sentServerId: string | undefined;
+    if (cliente.serverId) {
+      if (isValidUuid(cliente.serverId)) {
+        sentServerId = cliente.serverId.trim();
+        payloadClient.id = sentServerId;
+      } else {
+        Logger.warn(`serverId inválido omitido para evitar 400`, {
+          clienteId: cliente.id,
+          serverId: cliente.serverId,
+        });
+      }
+    }
+
+    // API v16: preservar `advisor_id` (incluyendo excepción SuperAdmin) solo si es UUID válido.
+    const resolvedAdvisorId = cliente.asesorAsignado
+      ? resolveAdvisorId(
+          cliente.asesorAsignado.nombre,
+          sentServerId || cliente.serverId,
+          cliente.asesorAsignado.id
+        )
+      : "";
+    if (resolvedAdvisorId && isValidUuid(resolvedAdvisorId)) {
+      payloadClient.advisor_id = resolvedAdvisorId;
+    } else if (resolvedAdvisorId) {
+      Logger.warn(`advisor_id inválido omitido para evitar 400`, {
+        clienteId: cliente.id,
+        advisorId: resolvedAdvisorId,
+      });
+    }
+
+    return { cliente, payloadClient, sentServerId, resolvedAdvisorId };
+  };
+
+  const sanitizePayloadJson = (payloadObj: any): string =>
+    JSON.stringify(payloadObj, (_key, value) =>
+      typeof value === "string"
+        ? value.replace(/[\x00-\x08\x0B\x0C\x0E-\x1F\x7F]/g, "")
+        : value
+    );
+
+  // --- SYNC COMO JSON PURO (API Desktop v16) ---
   const forceSync = async (overrideList?: ClienteGuardado[], skipCloudRefresh?: boolean): Promise<string> => {
+    const activeAdvisor = advisorRef.current || advisor;
+
     if (isSyncingRef.current) {
       console.warn("Sincronización ya en curso. Ignorando petición concurrente.");
       return "Sincronización ya en curso.";
     }
 
     // CAPACITACIÓN BYPASS: Restricción absoluta para evitar enviar ADNs de prueba a la base de datos
-    if (advisor?.training) {
+    if (activeAdvisor?.training) {
       setSyncStatus("synced");
       return "ℹ️ Modo Capacitación: El ADN se ha guardado en tu memoria local exitosamente. No se sincronizará a la nube para no alterar las métricas reales.";
     }
 
     // DEV MODE BYPASS: Evitar auto-sincronización y logouts forzados por token falso
-    if (advisor?.id === "DEV-MODE") {
+    if (activeAdvisor?.id === "DEV-MODE") {
       setSyncStatus("synced");
       return "✅ DEV-MODE: Guardado sólo local. Sincronización saltada.";
+    }
+
+    // GUARDIA DE SESIÓN: Nunca enviar POST /api/profiles/new sin token (evita 404 y logouts en pantalla de login)
+    if (!activeAdvisor?.token) {
+      return "ERROR: No hay sesión activa para sincronizar.";
     }
 
     if (!isOnline) {
@@ -1158,371 +1373,568 @@ export const FinancialProvider = ({ children }: { children: ReactNode }) => {
     isSyncingRef.current = true;
     setSyncStatus("syncing");
 
-    // Usa la lista forzada (si se acaba de guardar algo) o el state actual
-    const baseList = overrideList || listaClientes;
-
-    // 1. Filtrar solo los pendientes (DELTAS)
-    const clientesPendientes = baseList.filter((c) => !c.sincronizado);
-
-    // Si no hay nada que subir, terminamos
-    if (clientesPendientes.length === 0) {
-      setSyncStatus("synced");
-      isSyncingRef.current = false;
-      return "✅ Todo está al día. No hay datos pendientes de envío.";
-    }
-
-    // 2. Construir el payload JSON con campos estrictos basados en api.yaml
-    const payload = {
-      clients: clientesPendientes.map((cliente) => {
-        let localStatus = cliente.estatusAdquisicion || (cliente.estatusCierre ? "cierre" : "en_espera");
-        let acqStatus = "pending";
-        // Map local status to strict API enum
-        if (localStatus === "en_espera") acqStatus = "pending";
-        if (localStatus === "descartado") acqStatus = "cancelled";
-        if (localStatus === "cierre") acqStatus = "completed";
-
-        const isClosed = acqStatus === "completed" || cliente.estatusCierre === true;
-
-        const payloadClient: any = {
-          name: cliente.nombre.substring(0, 100), // Max 100 chars as per API
-          is_closed: isClosed,
-          acquisition_status: acqStatus,
-          accompaniment_status: cliente.accompanimentStatus || "unaccompanied",
-          closing_types: cliente.tiposCierre || (cliente.tipoCierre ? [cliente.tipoCierre] : []),
-          data: mapClientData(cliente.data || {})
-        };
-
-        if (cliente.serverId) {
-          payloadClient.id = cliente.serverId;
-        }
-
-        if (cliente.asesorAsignado?.id) {
-          payloadClient.advisor_id = cliente.asesorAsignado.id;
-        }
-
-        return payloadClient;
-      }),
-    };
-
-    // 3. Envío al Servidor (API REAL)
     try {
-      const API_BASE_URL = process.env.EXPO_PUBLIC_API_URL || "https://panel.vigvita.com.mx";
-      const targetUrl = `${API_BASE_URL}/api/profiles/new`;
+      // Usa la lista forzada (si se acaba de guardar algo) o el state más reciente
+      const baseList = overrideList || listaClientesRef.current;
 
-      console.log(`[SYNC-V3] Iniciando petición POST a: ${targetUrl}`);
-      console.log(`[SYNC-V3] Payload exacto enviado:`, JSON.stringify(payload, null, 2));
+      // 1. Filtrar solo los pendientes (DELTAS)
+      const clientesPendientes = baseList.filter((c) => !c.sincronizado);
 
-      Logger.info(`Sincronización iniciada`, { clientes: clientesPendientes.length, url: targetUrl });
-
-      // Sanitizar: eliminar caracteres de control invisibles (ej. null bytes \x00)
-      // que algunos parsers estrictos del servidor rechazan con 400.
-      // Para datos normales, esta función es transparente (no altera nada visible).
-      const sanitizedBody = JSON.stringify(payload, (_key, value) =>
-        typeof value === 'string' ? value.replace(/[\x00-\x08\x0B\x0C\x0E-\x1F\x7F]/g, '') : value
-      );
-
-      const response = await fetch(targetUrl, {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          'Authorization': `Bearer ${advisor?.token || ''}`
-        },
-        body: sanitizedBody
-      });
-
-      console.log(`[SYNC-V3] Respuesta del servidor - Status: ${response.status}`);
-
-      // NUEVO: INTERCEPTOR DE SEGURIDAD EN GUARDADO SILENCIOSO
-      if (response.status === 401 || response.status === 403 || response.status === 404) {
-        console.warn("🔒 SESIÓN DECLINADA DURANTE SINCRONIZACIÓN: Usuario eliminado o token inválido.");
-        Logger.warn(`Sincronización rechazada (Sesión inválida)`, { status: response.status });
-        await logout();
-        return "ERROR: Sesión Inválida. Su acceso ha sido revocado y la sesión cerrada.";
+      // Si no hay nada que subir, terminamos
+      if (clientesPendientes.length === 0) {
+        setSyncStatus("synced");
+        return "✅ Todo está al día. No hay datos pendientes de envío.";
       }
 
-      if (response.status === 201) {
-        // ÉXITO: Parsear respuesta para obtener UUIDs
-        let returnedUuids: string[] = [];
-        let respuestaCrudaServidor: any = null;
-        try {
-          const resJson = await response.json();
-          respuestaCrudaServidor = resJson;
-          returnedUuids = resJson.data || [];
-        } catch (err) {
-          console.log("No se pudo parsear response de v3 o devolvió vacio. Errores posibles.");
+      const isTest = typeof process !== "undefined" && Boolean(process.env?.JEST_WORKER_ID);
+      const rawFirstDelayMs = isTest ? 10 : 400;
+      const rawNextDelayMs = isTest ? 10 : 550; // <= 1.8 req/s (debajo del límite 2 req/s de v16)
+      const rescueDelayMs = isTest ? 10 : 650; // <= 1.5 req/s
+
+      // 2. Construir entradas estrictas según api-desktop-v16.yaml y particionar si superan 4MB (límite servidor 5MB)
+      const allEntries = clientesPendientes.map(buildClientPayloadEntry);
+      const oversizedNames: string[] = [];
+      const chunks: (typeof allEntries)[] = [];
+      let currentChunk: typeof allEntries = [];
+      let currentChunkBytes = 20; // overhead aproximado de {"clients":[]}
+
+      for (const entry of allEntries) {
+        const singleSerialized = sanitizePayloadJson({ clients: [entry.payloadClient] });
+        const singleBytes = getUtf8ByteLength(singleSerialized);
+        if (singleBytes > MAX_REQUEST_BODY_BYTES) {
+          oversizedNames.push(entry.cliente.nombre);
+          Logger.error(`Prospecto excede el límite de 5MB de la API`, {
+            nombre: entry.cliente.nombre,
+            bytes: singleBytes,
+          });
+          continue;
         }
-        
-        Logger.info(`[VERBOSE] Respuesta del servidor 201`, { 
-            status: response.status, 
-            bodyRespuesta: respuestaCrudaServidor,
-            payloadEnviado: payload
+
+        if (currentChunk.length > 0 && currentChunkBytes + singleBytes > SAFE_BATCH_BODY_BYTES) {
+          chunks.push(currentChunk);
+          currentChunk = [];
+          currentChunkBytes = 20;
+        }
+        currentChunk.push(entry);
+        currentChunkBytes += singleBytes;
+      }
+      if (currentChunk.length > 0) {
+        chunks.push(currentChunk);
+      }
+
+      if (chunks.length === 0) {
+        setSyncStatus("pending");
+        showAlert(`No se pudo sincronizar (${oversizedNames.join(", ")}): el tamaño excede el límite máximo permitido de 5MB.`);
+        return "ERROR: Payload excede el límite de 5MB.";
+      }
+
+      // 3. Envío al Servidor (API Desktop v16)
+      const authHeaders = {
+        "Content-Type": "application/json",
+        Authorization: `Bearer ${activeAdvisor.token}`,
+      };
+
+      const syncedSuccessIds = new Set<string>();
+      const retainedAssignedIds = new Map<string, string>();
+      const updatedAdvisorsMap = new Map<string, { id: string; nombre: string }>();
+      let totalRawFailed = 0;
+      let totalRescueSynced = 0;
+      let totalRescueFailed = 0;
+      const rescueFailedReasons: string[] = [];
+
+      for (const chunkEntries of chunks) {
+        const payload = { clients: chunkEntries.map((e) => e.payloadClient) };
+        const sanitizedBody = sanitizePayloadJson(payload);
+
+        Logger.info(`Sincronización iniciada`, {
+          clientes: chunkEntries.length,
+          url: "/api/profiles/new",
         });
 
-        // --- NUEVO: READ-AFTER-WRITE VALIDATION ---
-        const failedSyncIds = new Set<string>();
-        const assignedIdsMap = new Map<string, string>();
-        let uuidIndex = 0;
+        const response = await apiFetch("/api/profiles/new", {
+          method: "POST",
+          headers: authHeaders,
+          body: sanitizedBody,
+        });
 
-        // Descargar y validar lo que el servidor acaba de guardar
-        for (let i = 0; i < clientesPendientes.length; i++) {
-          const pend = clientesPendientes[i];
-          let serverIdAsignado = pend.serverId;
-
-          // Lógica robusta de asignación de UUIDs
-          if (returnedUuids.length === clientesPendientes.length) {
-            // Mapeo directo 1:1 si el servidor devolvió la misma cantidad
-            serverIdAsignado = serverIdAsignado || returnedUuids[i];
-          } else {
-            // Si devolvió menos, consumimos los UUIDs solo para los prospectos nuevos
-            if (!serverIdAsignado && returnedUuids[uuidIndex]) {
-              serverIdAsignado = returnedUuids[uuidIndex];
-              uuidIndex++;
-            }
-          }
-
-          if (!serverIdAsignado) {
-            Logger.warn(`[Read-After-Write] Prospecto ${pend.nombre} no obtuvo un UUID. Considerado fallido.`);
-            failedSyncIds.add(pend.id);
-            continue;
-          }
-
-          assignedIdsMap.set(pend.id, serverIdAsignado);
-
+        if (response.status === 201) {
+          // ÉXITO: Parsear respuesta para obtener UUIDs generados por el servidor
+          let returnedUuids: string[] = [];
+          let respuestaCrudaServidor: any = null;
           try {
-            // Retraso de 400ms para el primer GET (para dar tiempo al servidor de procesar la DB), y 350ms para los siguientes
-            await new Promise(resolve => setTimeout(resolve, i === 0 ? 400 : 350));
-
-            const checkRes = await fetch(`${API_BASE_URL}/api/profiles/${serverIdAsignado}`, {
-              method: "GET",
-              headers: { "Authorization": `Bearer ${advisor?.token || ''}` }
-            });
-
-            if (checkRes.ok) {
-              const fullProfile = await checkRes.json();
-              let parsedData: any = {};
-              try {
-                if (typeof fullProfile.data === 'string' && fullProfile.data.trim().length > 0) {
-                  parsedData = JSON.parse(fullProfile.data);
-                } else if (typeof fullProfile.data === 'object' && fullProfile.data !== null) {
-                  parsedData = fullProfile.data;
-                }
-              } catch (e) {
-                parsedData = {};
-              }
-
-              // Comparar longitud de pirámide
-              const localPiramide = pend.data?.piramideLevels?.length || 0;
-              const serverPiramide = Array.isArray(parsedData.priority_levels) ? parsedData.priority_levels.length : 0;
-              
-              // Comparar longitud de referidos (ignorando referidos completamente vacíos que el servidor descarta)
-              const localReferidos = (pend.data?.referidos || []).filter((r: any) => r.nombre || r.telefono || r.notas).length;
-              const serverReferidos = (fullProfile.referrals || fullProfile.referidos || []).length;
-
-              // Comparar longitud de hijos (ignorando vacíos)
-              const localHijos = (pend.data?.hijos || []).filter((h: any) => h.nombre || h.universidad).length;
-              const serverHijos = Array.isArray(parsedData.children) ? parsedData.children.length : 0;
-
-              if (localPiramide !== serverPiramide || localReferidos !== serverReferidos || localHijos !== serverHijos) {
-                Logger.warn(`[Read-After-Write] DISCREPANCIA DE DATOS PARA ${pend.nombre}. Piramide: ${localPiramide}vs${serverPiramide}, Referidos: ${localReferidos}vs${serverReferidos}, Hijos: ${localHijos}vs${serverHijos}. Se aceptará la versión del servidor.`);
-                // Ya no fallamos la sincronización. El servidor es la fuente de la verdad.
-                // Si el servidor eliminó duplicados o ignoró datos, lo aceptamos para no quedarnos atascados.
-              } else {
-                console.log(`[Read-After-Write] Validación post-escritura exitosa para ${pend.nombre}.`);
-              }
-            } else {
-              Logger.warn(`[Read-After-Write] No se pudo descargar a ${pend.nombre} para validar. Reteniendo copia local. Status: ${checkRes.status}`);
-              failedSyncIds.add(pend.id);
-            }
-          } catch(e) {
-            Logger.error(`[Read-After-Write] Error de red validando a ${pend.nombre}:`, e);
-            failedSyncIds.add(pend.id);
+            const resJson = await response.json();
+            respuestaCrudaServidor = resJson;
+            returnedUuids = Array.isArray(resJson?.data) ? resJson.data : [];
+          } catch {
+            returnedUuids = [];
           }
-        }
 
-        if (failedSyncIds.size > 0) {
-          showAlert(`⚠️ ATENCIÓN: ${failedSyncIds.size} prospecto(s) se enviaron pero el servidor no guardó sus datos completos. Se conservará la copia local y se reintentará en la próxima sincronización para evitar pérdida de datos.`);
-        }
-
-        setListaClientes((prev) => {
-          // Si el prospecto recién sincronizado es el que está en pantalla, actualizamos currentServerId
-          clientesPendientes.forEach((pend, idx) => {
-            if (pend.id === currentClientId && returnedUuids[idx]) {
-              setCurrentServerId(returnedUuids[idx]);
-            }
+          Logger.info(`[VERBOSE] Respuesta del servidor 201`, {
+            status: response.status,
+            bodyRespuesta: respuestaCrudaServidor,
+            payloadEnviado: payload,
           });
 
+          // --- Mapeo de UUIDs alineado a v16 ---
+          // v16: `data` contiene 1 UUID por cada cliente enviado SIN `id`, más cualquier
+          // UUID de reemplazo si un `id` enviado colisionó con el perfil de otro asesor.
+          // Clientes enviados con `id` propio o sin usar NO aparecen en `data` (puede venir vacío `[]`).
+          const assignedIdsMap = new Map<string, string>();
+          let uuidCursor = 0;
+
+          if (chunkEntries.length === 1 && chunkEntries[0].sentServerId && returnedUuids.length === 1) {
+            // Caso explícito de colisión en envío unitario: el servidor reemplazó el UUID
+            assignedIdsMap.set(chunkEntries[0].cliente.id, returnedUuids[0]);
+            uuidCursor = 1;
+          } else {
+            for (const entry of chunkEntries) {
+              if (entry.sentServerId) {
+                assignedIdsMap.set(entry.cliente.id, entry.sentServerId);
+              } else if (returnedUuids[uuidCursor]) {
+                assignedIdsMap.set(entry.cliente.id, returnedUuids[uuidCursor]);
+                uuidCursor++;
+              }
+            }
+          }
+
+          const extraReplacementUuids = returnedUuids.slice(uuidCursor);
+
+          // --- READ-AFTER-WRITE VALIDATION ---
+          const failedSyncIds = new Set<string>();
+
+          for (let i = 0; i < chunkEntries.length; i++) {
+            const entry = chunkEntries[i];
+            const pend = entry.cliente;
+            let serverIdAsignado = assignedIdsMap.get(pend.id);
+
+            if (!serverIdAsignado) {
+              Logger.warn(`[Read-After-Write] Prospecto ${pend.nombre} no obtuvo un UUID. Considerado fallido.`);
+              failedSyncIds.add(pend.id);
+              continue;
+            }
+
+            try {
+              await new Promise((resolve) =>
+                setTimeout(resolve, i === 0 ? rawFirstDelayMs : rawNextDelayMs)
+              );
+
+              let checkRes = await apiFetch(`/api/profiles/${serverIdAsignado}`, {
+                method: "GET",
+                headers: { Authorization: `Bearer ${activeAdvisor.token}` },
+              });
+
+              // Si enviamos un `id` que colisionó con otro asesor en un batch mixto,
+              // nuestro GET al ID viejo dará 404 y el UUID de reemplazo estará en `extraReplacementUuids`.
+              if (
+                checkRes.status === 404 &&
+                entry.sentServerId &&
+                extraReplacementUuids.length > 0
+              ) {
+                for (let k = 0; k < extraReplacementUuids.length; k++) {
+                  const candidateUuid = extraReplacementUuids[k];
+                  const retryCheck = await apiFetch(`/api/profiles/${candidateUuid}`, {
+                    method: "GET",
+                    headers: { Authorization: `Bearer ${activeAdvisor.token}` },
+                  });
+                  if (retryCheck.ok) {
+                    serverIdAsignado = candidateUuid;
+                    assignedIdsMap.set(pend.id, candidateUuid);
+                    extraReplacementUuids.splice(k, 1);
+                    checkRes = retryCheck;
+                    Logger.info(`[Read-After-Write] Colisión UUID resuelta para ${pend.nombre}`, {
+                      nuevoUuid: candidateUuid,
+                    });
+                    break;
+                  }
+                }
+              }
+
+              if (checkRes.ok) {
+                const fullProfile = await checkRes.json();
+                let parsedData: any = {};
+                try {
+                  if (typeof fullProfile.data === "string" && fullProfile.data.trim().length > 0) {
+                    parsedData = JSON.parse(fullProfile.data);
+                  } else if (typeof fullProfile.data === "object" && fullProfile.data !== null) {
+                    parsedData = fullProfile.data;
+                  }
+                } catch {
+                  parsedData = {};
+                }
+
+                const localPiramide = pend.data?.piramideLevels?.length || 0;
+                const serverPiramide = Array.isArray(parsedData.priority_levels)
+                  ? parsedData.priority_levels.length
+                  : 0;
+
+                const localReferidos = (pend.data?.referidos || []).filter(
+                  (r: any) => r.nombre || r.telefono || r.notas
+                ).length;
+                const serverReferidos = (
+                  fullProfile.referrals ||
+                  fullProfile.referidos ||
+                  parsedData.referrals ||
+                  []
+                ).length;
+
+                const localHijos = (pend.data?.hijos || []).filter(
+                  (h: any) => h.nombre || h.universidad
+                ).length;
+                const serverHijos = Array.isArray(parsedData.children)
+                  ? parsedData.children.length
+                  : 0;
+
+                if (
+                  localPiramide !== serverPiramide ||
+                  localReferidos !== serverReferidos ||
+                  localHijos !== serverHijos
+                ) {
+                  Logger.warn(
+                    `[Read-After-Write] DISCREPANCIA DE DATOS PARA ${pend.nombre}. Piramide: ${localPiramide}vs${serverPiramide}, Referidos: ${localReferidos}vs${serverReferidos}, Hijos: ${localHijos}vs${serverHijos}. Se aceptará la versión del servidor.`
+                  );
+                }
+
+                syncedSuccessIds.add(pend.id);
+                if (pend.id === currentClientId) {
+                  setCurrentServerId(serverIdAsignado);
+                }
+                if (pend.asesorAsignado && entry.resolvedAdvisorId) {
+                  rememberAdnAdvisor(serverIdAsignado, {
+                    id: entry.resolvedAdvisorId,
+                    nombre: pend.asesorAsignado.nombre,
+                  });
+                }
+              } else {
+                Logger.warn(
+                  `[Read-After-Write] No se pudo descargar a ${pend.nombre} para validar. Reteniendo copia local. Status: ${checkRes.status}`
+                );
+                failedSyncIds.add(pend.id);
+                retainedAssignedIds.set(pend.id, serverIdAsignado);
+              }
+            } catch (e) {
+              Logger.error(`[Read-After-Write] Error de red validando a ${pend.nombre}:`, e);
+              failedSyncIds.add(pend.id);
+              retainedAssignedIds.set(pend.id, serverIdAsignado);
+            }
+          }
+
+          totalRawFailed += failedSyncIds.size;
+          continue;
+        }
+
+        // --- Respuesta NO 201: leer cuerpo y clasificar según API v16 ---
+        const bodyInfo = await safeReadResponseBody(response);
+
+        // 1. Fallo real de autenticación/permiso (401 o 404 text/plain) → logout
+        if (isProfilesNewAuthFailure(response.status, bodyInfo.contentType, bodyInfo.json)) {
+          console.warn("🔒 SESIÓN DECLINADA DURANTE SINCRONIZACIÓN: Usuario eliminado o token inválido.");
+          Logger.warn(`Sincronización rechazada (Sesión inválida)`, {
+            status: response.status,
+            contentType: bodyInfo.contentType,
+            body: bodyInfo.text.substring(0, 300),
+          });
+          await logout();
+          return "ERROR: Sesión Inválida. Su acceso ha sido revocado y la sesión cerrada.";
+        }
+
+        // 2. Rate Limit persistente tras reintentos (429 text/plain) → NO es fallo fatal
+        if (response.status === 429) {
+          Logger.warn(`Rate limit 429 persistente al sincronizar`);
+          setSyncStatus("pending");
+          showAlert("El servidor está procesando muchas solicitudes (429). Tus datos están seguros y se reintentará automáticamente.");
+          return "ERROR: Límite de peticiones (429). Reintenta en unos segundos.";
+        }
+
+        // 3. Si es 403 (not_authorized_for_advisor) o 404 JSON (some_advisors_not_found),
+        //    refrescar /api/profile-advisors ANTES de reintentar para auto-reparar UUIDs obsoletos
+        const isAdvisorAuthError =
+          response.status === 403 ||
+          (response.status === 404 && bodyInfo.json?.error === "some_advisors_not_found");
+        if (isAdvisorAuthError && (activeAdvisor.isLider || isLider)) {
+          await verificarLider().catch(() => {});
+        }
+
+        // 4. RESCUE MODE: en v16 un batch > 1 puede fallar completo por 1 solo prospecto
+        //    con 400 (UUID/campo desconocido/body), 422 (validación/tipo), 403 o 404 JSON.
+        const isRescuableBatch =
+          chunkEntries.length > 1 &&
+          (response.status === 400 ||
+            response.status === 422 ||
+            response.status === 403 ||
+            isAdvisorAuthError);
+
+        if (isRescuableBatch) {
+          console.warn(
+            `[SYNC-RESCUE] Batch falló con ${response.status}. Reintentando ${chunkEntries.length} prospectos individualmente...`
+          );
+          Logger.warn(
+            `Batch falló con ${response.status}. Iniciando Rescue Mode para ${chunkEntries.length} prospectos`,
+            { status: response.status, contentType: bodyInfo.contentType, body: bodyInfo.text }
+          );
+
+          for (let idx = 0; idx < chunkEntries.length; idx++) {
+            // Reconstruir entrada con /api/profile-advisors recién refrescado (por si cambió el UUID de un asesor)
+            const origEntry = chunkEntries[idx];
+            const entry = isAdvisorAuthError
+              ? buildClientPayloadEntry(origEntry.cliente)
+              : origEntry;
+            const cliente = entry.cliente;
+            if (
+              entry.resolvedAdvisorId &&
+              cliente.asesorAsignado &&
+              entry.resolvedAdvisorId !== cliente.asesorAsignado.id
+            ) {
+              updatedAdvisorsMap.set(cliente.id, {
+                id: entry.resolvedAdvisorId,
+                nombre: cliente.asesorAsignado.nombre,
+              });
+              Logger.info(`[SYNC-RESCUE] UUID de asesor actualizado automáticamente`, {
+                cliente: cliente.nombre,
+                asesor: cliente.asesorAsignado.nombre,
+                anterior: cliente.asesorAsignado.id,
+                nuevo: entry.resolvedAdvisorId,
+              });
+            }
+
+            try {
+              const singlePayload = { clients: [entry.payloadClient] };
+              const sBody = sanitizePayloadJson(singlePayload);
+
+              if (idx > 0) {
+                await new Promise((resolve) => setTimeout(resolve, rescueDelayMs));
+              }
+
+              const sRes = await apiFetch("/api/profiles/new", {
+                method: "POST",
+                headers: authHeaders,
+                body: sBody,
+              });
+
+              if (sRes.status === 201) {
+                let returnedUuid: string | undefined;
+                let respuestaCrudaRescate: any = null;
+                try {
+                  const j = await sRes.json();
+                  respuestaCrudaRescate = j;
+                  returnedUuid = Array.isArray(j?.data) ? j.data[0] : undefined;
+                } catch {}
+
+                // v16: si se envió `id` propio/sin colisión, `data` viene vacío `[]` y es éxito
+                const effectiveUuid = returnedUuid || entry.sentServerId;
+                syncedSuccessIds.add(cliente.id);
+                totalRescueSynced++;
+
+                if (cliente.id === currentClientId && effectiveUuid) {
+                  setCurrentServerId(effectiveUuid);
+                }
+                if (effectiveUuid && cliente.asesorAsignado && entry.resolvedAdvisorId) {
+                  rememberAdnAdvisor(effectiveUuid, {
+                    id: entry.resolvedAdvisorId,
+                    nombre: cliente.asesorAsignado.nombre,
+                  });
+                }
+
+                Logger.info(`[VERBOSE] Rescue Mode: Prospecto sincronizado`, {
+                  nombre: cliente.nombre,
+                  uuid: effectiveUuid,
+                  bodyRespuesta: respuestaCrudaRescate,
+                  payloadEnviado: singlePayload,
+                });
+              } else {
+                const sBodyInfo = await safeReadResponseBody(sRes);
+                if (isProfilesNewAuthFailure(sRes.status, sBodyInfo.contentType, sBodyInfo.json)) {
+                  Logger.warn(`Sincronización rechazada en Rescue Mode (Sesión inválida)`, {
+                    nombre: cliente.nombre,
+                    status: sRes.status,
+                    contentType: sBodyInfo.contentType,
+                    body: sBodyInfo.text.substring(0, 300),
+                  });
+                  await logout();
+                  return "ERROR: Sesión Inválida. Su acceso ha sido revocado y la sesión cerrada.";
+                }
+
+                let reason = `${cliente.nombre}`;
+                if (sRes.status === 403) {
+                  reason = `${cliente.nombre} (sin autorización para el asesor asignado)`;
+                } else if (sRes.status === 404 && sBodyInfo.json?.error === "some_advisors_not_found") {
+                  reason = `${cliente.nombre} (asesor asignado no encontrado)`;
+                } else if (sRes.status === 422) {
+                  const parsed422 = parse422Error(sBodyInfo.text, sBodyInfo.json);
+                  reason = `${cliente.nombre} (${parsed422.userMessage})`;
+                }
+
+                totalRescueFailed++;
+                rescueFailedReasons.push(reason);
+                console.error(
+                  `[SYNC-RESCUE] ❌ "${cliente.nombre}" falló individualmente: ${sRes.status} — ${sBodyInfo.text}`
+                );
+                Logger.error(`Rescue Mode: Prospecto falló`, {
+                  nombre: cliente.nombre,
+                  status: sRes.status,
+                  contentType: sBodyInfo.contentType,
+                  body: sBodyInfo.text,
+                  advisorIdEnviado: entry.resolvedAdvisorId || null,
+                  payloadEnviado: singlePayload,
+                });
+              }
+            } catch (e) {
+              totalRescueFailed++;
+              rescueFailedReasons.push(cliente.nombre);
+              console.error(`[SYNC-RESCUE] ❌ Excepción para "${cliente.nombre}":`, e);
+              Logger.error(`Rescue Mode: Excepción en prospecto`, { nombre: cliente.nombre, error: e });
+            }
+          }
+          continue;
+        }
+
+        // 4b. Auto-reintento unitario si tras refrescar /api/profile-advisors se encontró un UUID vigente distinto
+        if (chunkEntries.length === 1 && isAdvisorAuthError) {
+          const origEntry = chunkEntries[0];
+          const refreshedEntry = buildClientPayloadEntry(origEntry.cliente);
+          if (
+            refreshedEntry.resolvedAdvisorId &&
+            refreshedEntry.resolvedAdvisorId !== origEntry.resolvedAdvisorId
+          ) {
+            Logger.info(`Reintentando prospecto con UUID de asesor actualizado desde /api/profile-advisors`, {
+              nombre: refreshedEntry.cliente.nombre,
+              anterior: origEntry.resolvedAdvisorId,
+              nuevo: refreshedEntry.resolvedAdvisorId,
+            });
+            const retryPayload = { clients: [refreshedEntry.payloadClient] };
+            const retryRes = await apiFetch("/api/profiles/new", {
+              method: "POST",
+              headers: authHeaders,
+              body: sanitizePayloadJson(retryPayload),
+            });
+            if (retryRes.status === 201) {
+              let returnedUuid: string | undefined;
+              try {
+                const j = await retryRes.json();
+                returnedUuid = Array.isArray(j?.data) ? j.data[0] : undefined;
+              } catch {}
+              const effectiveUuid = returnedUuid || refreshedEntry.sentServerId;
+              syncedSuccessIds.add(refreshedEntry.cliente.id);
+              if (refreshedEntry.cliente.id === currentClientId && effectiveUuid) {
+                setCurrentServerId(effectiveUuid);
+              }
+              if (effectiveUuid && refreshedEntry.cliente.asesorAsignado) {
+                rememberAdnAdvisor(effectiveUuid, {
+                  id: refreshedEntry.resolvedAdvisorId,
+                  nombre: refreshedEntry.cliente.asesorAsignado.nombre,
+                });
+              }
+              continue;
+            }
+          }
+        }
+
+        // 5. Fallo individual (1 prospecto o error 5xx)
+        console.error("Error from API:", response.status, bodyInfo.text);
+        setSyncStatus("pending");
+
+        if (response.status === 403) {
+          showAlert(
+            "No tienes autorización para atribuir este ADN al asesor seleccionado. Puedes cambiar o quitar el asesor asignado desde el tablero e intentar de nuevo."
+          );
+        } else if (response.status === 404 && bodyInfo.json?.error === "some_advisors_not_found") {
+          showAlert(
+            "El asesor asignado a este ADN ya no fue encontrado en el sistema. Puedes cambiar o quitar el asesor asignado desde el tablero."
+          );
+        } else if (response.status === 422) {
+          const parsed422 = parse422Error(bodyInfo.text, bodyInfo.json);
+          showAlert(`No se pudo sincronizar:\n${parsed422.userMessage}`);
+        } else {
+          showAlert(`Error ${response.status}: ${(bodyInfo.text || "Error del servidor").substring(0, 100)}`);
+        }
+
+        Logger.error(`Fallo de sincronización general`, {
+          status: response.status,
+          contentType: bodyInfo.contentType,
+          body: bodyInfo.text,
+          payloadEnviado: payload,
+        });
+        return "ERROR: Fallo al crear perfiles en el servidor.";
+      }
+
+      // 4. Consolidar actualizaciones de estado local y persistencia
+      if (syncedSuccessIds.size > 0 || retainedAssignedIds.size > 0 || updatedAdvisorsMap.size > 0) {
+        setListaClientes((prev) => {
           const listaActualizada = prev
-            .filter((c) => {
-              const syncIndex = clientesPendientes.findIndex(pend => pend.id === c.id);
-              // Si el cliente NO estaba en pendientes, se queda.
-              if (syncIndex === -1) return true;
-              // Si estaba en pendientes PERO falló la validación Read-After-Write, se queda protegido.
-              if (failedSyncIds.has(c.id)) return true;
-              // Si estaba en pendientes y superó la validación, lo REMOVEMOS de storage (es seguro).
-              return false;
-            })
+            .filter((c) => !syncedSuccessIds.has(c.id))
             .map((c) => {
-              if (failedSyncIds.has(c.id) && assignedIdsMap.has(c.id)) {
-                // BUGFIX CRÍTICO: Si falló la validación pero se creó en el servidor, DEBEMOS
-                // guardarle el UUID asigado. Así, el próximo reintento hará un UPDATE y no un CREATE (Duplicados)
-                return { ...c, serverId: assignedIdsMap.get(c.id) };
+              const assignedUuid = retainedAssignedIds.get(c.id);
+              const updatedAdvisor = updatedAdvisorsMap.get(c.id);
+              if (assignedUuid || updatedAdvisor) {
+                return {
+                  ...c,
+                  ...(assignedUuid ? { serverId: assignedUuid } : {}),
+                  ...(updatedAdvisor ? { asesorAsignado: updatedAdvisor } : {}),
+                };
               }
               return c;
             });
 
-          // Persistimos dentro del updater de estado para asegurar la fuente de la verdad
           storage.setItem("clientes_db", JSON.stringify(listaActualizada)).catch(console.error);
           return listaActualizada;
         });
-
-        setSyncStatus("synced");
-        setLastSyncTime(new Date().toLocaleTimeString());
-
-        // Auto-refresh: Traer los prospectos de la nube para que aparezcan
-        // inmediatamente en la lista sin que el usuario presione "Cargar Nube".
-        // Se omite cuando forceSync fue disparado por el handler de needs_resync
-        // para evitar un bucle infinito (resync → sync → fetch → resync...).
-        if (!skipCloudRefresh) {
-          setTimeout(() => {
-            fetchSincronizadosNube();
-          }, 500);
-        }
-
-        Logger.info(`Sincronización exitosa`, { prospectosSincronizados: clientesPendientes.length });
-        isSyncingRef.current = false;
-        return "Sincronización exitosa con el servidor.";
-      } else if (response.status === 400 && clientesPendientes.length > 1) {
-        // ── RESCUE MODE ──────────────────────────────────────────────────
-        // El batch completo falló con 400. Reintentamos cada prospecto
-        // individualmente para aislar cuál tiene el problema y permitir
-        // que los buenos se sincronicen sin bloquearse.
-        // ──────────────────────────────────────────────────────────────────
-        console.warn(`[SYNC-RESCUE] Batch 400. Reintentando ${clientesPendientes.length} prospectos individualmente...`);
-        Logger.warn(`Batch falló con 400. Iniciando Rescue Mode para ${clientesPendientes.length} prospectos`);
-
-        const syncedIds: { localId: string; uuid?: string }[] = [];
-        const failedNames: string[] = [];
-
-        for (const cliente of clientesPendientes) {
-          try {
-            let ls = cliente.estatusAdquisicion || (cliente.estatusCierre ? "cierre" : "en_espera");
-            let aq = "pending";
-            if (ls === "en_espera") aq = "pending";
-            if (ls === "descartado") aq = "cancelled";
-            if (ls === "cierre") aq = "completed";
-
-            const singlePayload = { clients: [{
-              name: cliente.nombre.substring(0, 100),
-              is_closed: aq === "completed" || cliente.estatusCierre === true,
-              acquisition_status: aq,
-              accompaniment_status: cliente.accompanimentStatus || "unaccompanied",
-              closing_types: cliente.tiposCierre || (cliente.tipoCierre ? [cliente.tipoCierre] : []),
-              data: mapClientData(cliente.data || {}),
-              ...(cliente.serverId ? { id: cliente.serverId } : {}),
-              ...(cliente.asesorAsignado?.id ? { advisor_id: cliente.asesorAsignado.id } : {}),
-            }]};
-
-            const sBody = JSON.stringify(singlePayload, (_k, v) =>
-              typeof v === 'string' ? v.replace(/[\x00-\x08\x0B\x0C\x0E-\x1F\x7F]/g, '') : v
-            );
-
-            // Añadimos un pequeño delay para no disparar el límite de velocidad (429 Too Many Requests) del servidor
-            await new Promise(resolve => setTimeout(resolve, 1500));
-
-            const sRes = await fetch(targetUrl, {
-              method: 'POST',
-              headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${advisor?.token || ''}` },
-              body: sBody
-            });
-
-            if (sRes.status === 201) {
-              let uuid: string | undefined;
-              let respuestaCrudaRescate: any = null;
-              try { 
-                const j = await sRes.json(); 
-                respuestaCrudaRescate = j;
-                uuid = j.data?.[0]; 
-              } catch {}
-              syncedIds.push({ localId: cliente.id, uuid });
-              console.log(`[SYNC-RESCUE] ✅ "${cliente.nombre}" sincronizado exitosamente.`);
-              Logger.info(`[VERBOSE] Rescue Mode: Prospecto sincronizado`, { 
-                nombre: cliente.nombre, 
-                uuid,
-                bodyRespuesta: respuestaCrudaRescate,
-                payloadEnviado: singlePayload
-              });
-            } else {
-              const eT = await sRes.text().catch(() => "");
-              console.error(`[SYNC-RESCUE] ❌ "${cliente.nombre}" falló individualmente: ${sRes.status} — ${eT}`);
-              failedNames.push(cliente.nombre);
-              Logger.error(`Rescue Mode: Prospecto falló`, { 
-                nombre: cliente.nombre, 
-                status: sRes.status, 
-                body: eT,
-                payloadEnviado: singlePayload 
-              });
-            }
-          } catch (e) {
-            console.error(`[SYNC-RESCUE] ❌ Excepción para "${cliente.nombre}":`, e);
-            failedNames.push(cliente.nombre);
-            Logger.error(`Rescue Mode: Excepción en prospecto`, { nombre: cliente.nombre, error: e });
-          }
-        }
-
-        // Procesar resultados del rescate
-        if (syncedIds.length > 0) {
-          setListaClientes((prev) => {
-            syncedIds.forEach(({ localId, uuid }) => {
-              if (localId === currentClientId && uuid) setCurrentServerId(uuid);
-            });
-            const successSet = new Set(syncedIds.map(s => s.localId));
-            const updated = prev.filter(c => !successSet.has(c.id));
-            storage.setItem("clientes_db", JSON.stringify(updated)).catch(console.error);
-            return updated;
-          });
-        }
-
-        if (failedNames.length > 0 && syncedIds.length > 0) {
-          setSyncStatus("pending");
-          showAlert(`✅ ${syncedIds.length} prospecto(s) sincronizado(s) con éxito.\n\n⚠️ No se pudo sincronizar: ${failedNames.join(", ")}.\nSus datos están seguros en tu dispositivo.`);
-        } else if (failedNames.length > 0) {
-          setSyncStatus("pending");
-          showAlert(`No se pudieron sincronizar: ${failedNames.join(", ")}. Tus datos están seguros en tu dispositivo.`);
-        } else {
-          setSyncStatus("synced");
-          setLastSyncTime(new Date().toLocaleTimeString());
-          if (!skipCloudRefresh) setTimeout(() => fetchSincronizadosNube(), 500);
-        }
-
-        isSyncingRef.current = false;
-        return syncedIds.length > 0 ? "Sincronización parcial completada." : "ERROR: Todos los prospectos fallaron individualmente.";
-
-      } else {
-        // Fallo al crear en servidor
-        const errText = await response.text();
-        console.error("Error from API:", response.status, errText);
-        console.log("PAYLOAD SENT:", JSON.stringify(payload, null, 2));
-        setSyncStatus("pending");
-        showAlert(`Error ${response.status}: ${errText.substring(0, 100)}... `);
-        Logger.error(`Fallo de sincronización general`, { 
-          status: response.status, 
-          body: errText,
-          payloadEnviado: payload
-        });
-        isSyncingRef.current = false;
-        return "ERROR: Fallo al crear perfiles en el servidor.";
       }
+
+      if (oversizedNames.length > 0) {
+        rescueFailedReasons.push(...oversizedNames.map((n) => `${n} (excede 5MB)`));
+        totalRescueFailed += oversizedNames.length;
+      }
+
+      if (totalRawFailed > 0) {
+        showAlert(
+          `⚠️ ATENCIÓN: ${totalRawFailed} prospecto(s) se enviaron pero el servidor no guardó sus datos completos. Se conservará la copia local y se reintentará en la próxima sincronización para evitar pérdida de datos.`
+        );
+      }
+
+      if (totalRescueFailed > 0 && syncedSuccessIds.size > 0) {
+        setSyncStatus("pending");
+        showAlert(
+          `✅ ${syncedSuccessIds.size} prospecto(s) sincronizado(s) con éxito.\n\n⚠️ No se pudo sincronizar: ${rescueFailedReasons.join(", ")}.\nSus datos están seguros en tu dispositivo.`
+        );
+        return "Sincronización parcial completada.";
+      }
+
+      if (totalRescueFailed > 0 && syncedSuccessIds.size === 0) {
+        setSyncStatus("pending");
+        showAlert(
+          `No se pudieron sincronizar: ${rescueFailedReasons.join(", ")}. Tus datos están seguros en tu dispositivo.`
+        );
+        return "ERROR: Todos los prospectos fallaron individualmente.";
+      }
+
+      setSyncStatus("synced");
+      setLastSyncTime(new Date().toLocaleTimeString());
+
+      // Auto-refresh de nube (se omite cuando viene de needs_resync para evitar bucle infinito)
+      if (!skipCloudRefresh) {
+        setTimeout(() => {
+          fetchSincronizadosNube();
+        }, 500);
+      }
+
+      Logger.info(`Sincronización exitosa`, {
+        prospectosSincronizados: syncedSuccessIds.size,
+        rescatados: totalRescueSynced,
+      });
+      return "Sincronización exitosa con el servidor.";
     } catch (error) {
       console.error("Error al sincronizar:", error);
       setSyncStatus("pending");
       showAlert("Error de red al intentar sincronizar.");
       Logger.error(`Excepción durante la sincronización`, error);
-      isSyncingRef.current = false;
       return "ERROR: Excepción durante la sincronización.";
+    } finally {
+      isSyncingRef.current = false;
     }
   };
 
   const fetchSincronizadosNube = async () => {
+    // API v16: Advisor_Trainee nunca puede llamar a endpoints de perfiles (devuelven 404)
+    if (advisor?.training) return;
     if (!isOnline) {
       showAlert("Sin conexión a internet. No se pueden cargar los prospectos de la nube.");
       return;
@@ -1531,21 +1943,28 @@ export const FinancialProvider = ({ children }: { children: ReactNode }) => {
 
     setIsFetchingCloud(true);
     try {
-      const API_BASE_URL = process.env.EXPO_PUBLIC_API_URL || "https://panel.vigvita.com.mx";
-      const authHeaders = { "Authorization": `Bearer ${advisor.token}` };
+      const authHeaders = { Authorization: `Bearer ${advisor.token}` };
 
       // ============================================================
-      // PASO 1: Obtener el ÍNDICE de perfiles (API v10 — solo resumen)
+      // PASO 1: Obtener el ÍNDICE de perfiles (API v10+ — solo resumen)
       // GET /api/profiles → { profiles: [{ id, client_name, status, ... }] }
-      // Ya NO incluye 'data'. Los datos completos se piden individualmente.
       // ============================================================
-      const response = await fetch(`${API_BASE_URL}/api/profiles`, {
+      const response = await apiFetch("/api/profiles", {
         method: "GET",
-        headers: authHeaders
+        headers: authHeaders,
       });
 
       if (response.status === 401 || response.status === 403 || response.status === 404) {
+        Logger.warn(`Fetch nube rechazado (Sesión inválida)`, {
+          status: response.status,
+          url: "/api/profiles",
+        });
         await logout();
+        return;
+      }
+
+      if (response.status === 429) {
+        showAlert("El servidor está ocupado (límite de peticiones). Intenta cargar tus ADNs nuevamente en unos segundos.");
         return;
       }
 
@@ -1565,9 +1984,7 @@ export const FinancialProvider = ({ children }: { children: ReactNode }) => {
           }
         }
 
-        // --- Procesar resumen de perfiles sanos (API v10: sin data) ---
-        // Los datos completos se obtienen bajo demanda en cargarProspecto
-        // cuando el usuario selecciona un prospecto específico.
+        // --- Procesar resumen de perfiles sanos ---
         const mappedCloud = profilesOk.map((p: any) => {
           // WebKit safe date parsing
           let safeDate = new Date();
@@ -1581,7 +1998,7 @@ export const FinancialProvider = ({ children }: { children: ReactNode }) => {
           if (p.status === "completed") localStatus = "cierre";
           else if (p.status === "cancelled") localStatus = "descartado";
 
-          // Mapear relationship del servidor
+          // Mapear relationship del servidor (v16: incluye SuperAdmin y TeamLeader)
           const relationship = p.relationship || {};
 
           const mapped: ClienteGuardado = {
@@ -1593,18 +2010,20 @@ export const FinancialProvider = ({ children }: { children: ReactNode }) => {
             accompanimentStatus: p.accompaniment_status || "unaccompanied",
             sincronizado: true,
             data: {
-              // API v11: Poblamos los referidos con el resumen directo del servidor.
-              // Soportamos 'referrals' (inglés/v11) o 'referidos' (español/legacy)
-              referidos: unmapReferralsList(p.referrals || p.referidos || [])
+              referidos: unmapReferralsList(p.referrals || p.referidos || []),
             },
           };
 
-          // "hecho para" — el líder ve para quién lo hizo
+          // "hecho para" — resuelve UUID vía mapa por perfil, equipoLiderRef o directorio cacheado
+          // (corrige race condition al arrancar y soporta la excepción SuperAdmin para asesores expirados)
           if (relationship.created_for) {
-            const matchedAdvisor = equipoLider.find(a => a.nombre === relationship.created_for);
-            mapped.asesorAsignado = { id: matchedAdvisor ? matchedAdvisor.id : '', nombre: relationship.created_for };
+            const resolvedId = resolveAdvisorId(relationship.created_for, p.id);
+            mapped.asesorAsignado = { id: resolvedId, nombre: relationship.created_for };
+            if (resolvedId) {
+              rememberAdnAdvisor(p.id, mapped.asesorAsignado);
+            }
           }
-          // "hecho por" — el asesor ve quién se lo creó
+          // "hecho por" — el asesor ve quién se lo creó (líder o SuperAdmin)
           if (relationship.created_by) {
             mapped.creadoPor = relationship.created_by;
           }
@@ -1776,15 +2195,28 @@ export const FinancialProvider = ({ children }: { children: ReactNode }) => {
               if (validUser.nombre && validUser.nombre === emailPrefix) {
                 validUser.nombre = ""; // Era un nombre falso derivado del email
               }
+              advisorRef.current = validUser;
               setAdvisor(validUser);
               setUserName(validUser.nombre);
             }
           }
         }
-        // 2. Cargar DB Local (sin purga — la limpieza segura ocurre en fetchSincronizadosNube
-        //    después de que el servidor confirme que tiene los datos)
+        // 2. Cargar DB Local y cachés de directorio de asesores (API v16)
         const storedDB = await storage.getItem<string>("clientes_db");
-        if (storedDB) setListaClientes(JSON.parse(storedDB));
+        if (storedDB) {
+          const parsedDB = JSON.parse(storedDB);
+          listaClientesRef.current = parsedDB;
+          setListaClientes(parsedDB);
+        }
+
+        try {
+          const storedDir = await storage.getItem<string>("advisors_directory_cache");
+          if (storedDir) advisorsDirectoryRef.current = JSON.parse(storedDir) || {};
+          const storedAdnMap = await storage.getItem<string>("adn_advisor_map");
+          if (storedAdnMap) adnAdvisorMapRef.current = JSON.parse(storedAdnMap) || {};
+        } catch (e) {
+          console.warn("Error cargando caché de directorio de asesores:", e);
+        }
 
         // 2b. RESPALDO DE EMERGENCIA (pre-migration snapshot)
         // Se ejecuta UNA SOLA VEZ: la primera vez que la app corre con esta versión.
@@ -1815,6 +2247,7 @@ export const FinancialProvider = ({ children }: { children: ReactNode }) => {
             } else {
               if (draftObj.currentClientId !== undefined) setCurrentClientId(draftObj.currentClientId);
               if (draftObj.currentServerId !== undefined) setCurrentServerId(draftObj.currentServerId);
+              if (draftObj.asesorSeleccionadoGlobal) setAsesorSeleccionadoGlobal(draftObj.asesorSeleccionadoGlobal);
               if (draftObj.nombreCliente) setNombreCliente(draftObj.nombreCliente);
               if (draftObj.perfil) setPerfil(draftObj.perfil);
               if (draftObj.hijos) setHijos(draftObj.hijos);
@@ -1875,17 +2308,35 @@ export const FinancialProvider = ({ children }: { children: ReactNode }) => {
     }
   }, [isInitialized, advisor]);
 
-  // LOGIN (INTEGRADO CON BACKEND)
+  // Hidratación reactiva: si `equipoLider` llega después de `listaNube`, completar `asesorAsignado.id`
+  useEffect(() => {
+    if (equipoLider.length === 0) return;
+    setListaNube((prev) => {
+      let changed = false;
+      const next = prev.map((c) => {
+        if (c.asesorAsignado?.nombre && !c.asesorAsignado.id) {
+          const resolvedId = resolveAdvisorId(c.asesorAsignado.nombre, c.serverId);
+          if (resolvedId) {
+            changed = true;
+            const updated = { id: resolvedId, nombre: c.asesorAsignado.nombre };
+            rememberAdnAdvisor(c.serverId, updated);
+            return { ...c, asesorAsignado: updated };
+          }
+        }
+        return c;
+      });
+      return changed ? next : prev;
+    });
+  }, [equipoLider]);
+
+  // LOGIN (INTEGRADO CON BACKEND — API Desktop v16)
   const login = async (
     email: string,
     pass: string,
   ): Promise<{ success: boolean; error?: string }> => {
     try {
-      const API_BASE_URL =
-        process.env.EXPO_PUBLIC_API_URL || "https://panel.vigvita.com.mx";
-
-      // Añadimos ?api=true como dicta la v8 para obtener training y is_leader
-      const response = await fetch(`${API_BASE_URL}/api/login?api=true`, {
+      // ?api=true inyecta training e is_leader en la respuesta
+      const response = await apiFetch("/api/login?api=true", {
         method: "POST",
         headers: {
           "Content-Type": "application/json",
@@ -1895,26 +2346,25 @@ export const FinancialProvider = ({ children }: { children: ReactNode }) => {
 
       if (response.ok) {
         const data = await response.json();
-        
+
         Logger.info(`Login exitoso`, { email });
 
-        // Creamos un usuario con el token devuelto
         const user: Advisor = {
-          id: "ADV-" + Math.floor(Math.random() * 1000), // Temporalmente un ID ficticio (el doc solo indica token)
-          nombre: data.name || "", // Solo usar nombre del backend; vacío hasta que el backend lo devuelva
+          id: "ADV-" + Math.floor(Math.random() * 1000),
+          nombre: data.name || "",
           email: email,
           token: data.token,
-          training: data.training === true, // Mapeo de bandera Trainee desde la base de datos
-          isLider: data.is_leader === true, // Mapeo de bandera Leader (v8 API)
+          training: data.training === true,
+          isLider: data.is_leader === true,
         };
 
-        // Guardamos el objeto de sesión con la FECHA ACTUAL
         const sessionData = {
           user: user,
-          loginTime: Date.now(), // CRÍTICO PARA LA CADUCIDAD
-          sessionVersion: APP_SESSION_VERSION // CRÍTICO PARA PURGA MASIVA AL ACTUALIZAR
+          loginTime: Date.now(),
+          sessionVersion: APP_SESSION_VERSION,
         };
 
+        advisorRef.current = user;
         setAdvisor(user);
         setUserName(user.nombre);
         await storage.setItem(
@@ -1923,19 +2373,23 @@ export const FinancialProvider = ({ children }: { children: ReactNode }) => {
         );
         return { success: true };
       } else {
+        if (response.status === 429) {
+          Logger.warn(`Intento de login limitado por rate limit (429)`, { email });
+          return { success: false, error: "rate_limited" };
+        }
+
         try {
           const errorData = await response.json();
           if (errorData && errorData.error) {
             Logger.warn(`Intento de login fallido`, { email, error: errorData.error });
             return { success: false, error: errorData.error };
           }
-        } catch (e) {
+        } catch {
           // Fallback a códigos de estado si no hay JSON
         }
 
         Logger.warn(`Intento de login fallido`, { email, status: response.status });
 
-        // Fallbacks de seguridad por si el servidor no devuelve JSON con "error"
         if (response.status === 401)
           return { success: false, error: "invalid_credentials" };
         if (response.status === 403)
@@ -1958,16 +2412,17 @@ export const FinancialProvider = ({ children }: { children: ReactNode }) => {
       nombre: `Desarrollador (${role})`,
       email: "dev@local.host",
       token: "dev-fake-token",
-      training: role === 'training', // Seleccionado si pide testing de capacitación
-      isLider: role === 'lider', // Seleccionado si pide role líder
+      training: role === 'training',
+      isLider: role === 'lider',
     };
 
     const sessionData = {
       user: devUser,
       loginTime: Date.now(),
-      sessionVersion: APP_SESSION_VERSION
+      sessionVersion: APP_SESSION_VERSION,
     };
 
+    advisorRef.current = devUser;
     setAdvisor(devUser);
     setUserName(devUser.nombre);
     await storage.setItem("advisor_session", JSON.stringify(sessionData));
@@ -1975,159 +2430,208 @@ export const FinancialProvider = ({ children }: { children: ReactNode }) => {
 
   const logout = async () => {
     Logger.info(`Usuario hizo logout`);
-    // API v15: Invalidar sesión en el servidor antes de limpiar localmente
+    // API v15/v16: Invalidar sesión en el servidor para todos los roles (incluyendo trainees)
     if (advisor?.token && isOnline && advisor.id !== "DEV-MODE") {
       try {
-        const API_BASE_URL = process.env.EXPO_PUBLIC_API_URL || "https://panel.vigvita.com.mx";
-        await fetch(`${API_BASE_URL}/api/logout`, {
-          method: "POST",
-          headers: { "Authorization": `Bearer ${advisor.token}` },
-        });
+        await apiFetch(
+          "/api/logout",
+          {
+            method: "POST",
+            headers: { Authorization: `Bearer ${advisor.token}` },
+          },
+          { maxRetries: 1 }
+        );
       } catch (e) {
         // Si falla (red caída, servidor no disponible), no bloqueamos el logout local
         console.warn("No se pudo invalidar la sesión en el servidor:", e);
       }
     }
 
-    // Limpieza local (como antes)
+    // Limpieza completa del estado de sesión en memoria (preservando clientes_db locales)
+    advisorRef.current = null;
     setAdvisor(null);
+    setUserName("");
+    setListaNube([]);
+    equipoLiderRef.current = [];
+    setEquipoLider([]);
+    setIsLider(false);
+    setAsesorSeleccionadoGlobal(null);
+    accessExpiresAtRef.current = null;
+    setAccessExpiresAt(null);
     await storage.removeItem("advisor_session");
-    // No borramos la DB local, solo la sesión
   };
 
   const validateSession = async (): Promise<boolean> => {
     if (!advisor?.token) return false;
 
-    // DEV MODE BYPASS: Si es el usuario simulado de desarrollo, saltamos la validación
+    // DEV MODE BYPASS
     if (advisor.id === "DEV-MODE") return true;
 
-    // Si no estamos en línea (simulador interno), no podemos validar, dejamos pasar.
+    // Sin conexión: permitir acceso offline (validado por límite de 7 días en init)
     if (!isOnline) return true;
 
     try {
-      const API_BASE_URL = process.env.EXPO_PUBLIC_API_URL || "https://panel.vigvita.com.mx";
-
-      // TRAINEES: Validamos contra /app/d/u.json (solo requiere 'auth') porque
-      // /api/profiles/new exige permiso 'advisor' que los trainees no tienen.
-      // ASESORES NORMALES: Validamos contra /api/profiles/new como siempre.
-      const isTrainee = advisor.training === true;
-      const targetUrl = isTrainee
-        ? `${API_BASE_URL}/app/d/u.json`
-        : `${API_BASE_URL}/api/profiles/new`;
-
-      const response = await fetch(targetUrl, {
-        method: isTrainee ? "GET" : "POST",
+      // API Desktop v16: GET /api/me/access-status funciona para TODOS los roles
+      // (SuperAdmin, TeamLeader, Advisor y Advisor_Trainee), evitando el hack 422
+      // de /api/profiles/new y el uso indebido del updater /app/d/u.json.
+      const response = await apiFetch("/api/me/access-status", {
+        method: "GET",
         headers: {
-          ...(isTrainee ? {} : { "Content-Type": "application/json" }),
-          "Authorization": `Bearer ${advisor.token}`
+          Authorization: `Bearer ${advisor.token}`,
         },
-        ...(isTrainee ? {} : { body: JSON.stringify({ clients: [] }) })
       });
 
-      // El middleware auth lanza 404/401 si el usuario fue borrado o si el token caducó.
-      // Esto aplica TANTO para trainees como para asesores normales.
+      // Auth middleware devuelve 404 text/plain si la sesión fue revocada o venció
       if (response.status === 404 || response.status === 401 || response.status === 403) {
-        Logger.warn(`Validación de sesión fallida (token revocado/vencido)`, { status: response.status, email: advisor.email });
-        Alert.alert("Error de Autenticación", `El servidor denegó tu sesión (Código: ${response.status}). Saliendo...`);
-        await logout(); // Force logout inmediatamente
+        Logger.warn(`Validación de sesión fallida (token revocado/vencido)`, {
+          status: response.status,
+          email: advisor.email,
+        });
+        Alert.alert(
+          "Error de Autenticación",
+          `El servidor denegó tu sesión (Código: ${response.status}). Saliendo...`
+        );
+        await logout();
         return false;
       }
 
-      Logger.info(`Sesión validada correctamente`, { 
-        status: response.status, 
-        email: advisor.email,
-        urlSolicitada: targetUrl,
-        metodo: isTrainee ? "GET" : "POST"
-      });
-
-      // Para asesores normales: 422 (body empty) = auth OK. Para trainees: 200 = auth OK.
-      if (!isTrainee && response.status !== 422 && response.status !== 201 && response.status !== 200) {
-        Alert.alert("Advertencia de Red", `Respuesta inusual: ${response.status}`);
+      // Rate limit persistente: mantener sesión local sin alertas ni cierres
+      if (response.status === 429) {
+        Logger.warn(`Validación de sesión limitada por 429; conservando sesión en caché`);
+        return true;
       }
 
-      // Actualizamos el TimeStamp para renovar sus 7 días de vida offline:
+      if (response.ok) {
+        try {
+          const data = await response.json();
+          const cutoff = data?.access_expires_at || null;
+          accessExpiresAtRef.current = cutoff;
+          setAccessExpiresAt(cutoff);
+
+          if (cutoff && new Date(cutoff).getTime() < Date.now()) {
+            Alert.alert("Sesión Terminada", "Tu periodo de acceso ha concluido.");
+            await logout();
+            return false;
+          }
+        } catch {
+          // Si la respuesta 200 no trajo JSON parseable en un mock simple, continuar
+        }
+      }
+
+      Logger.info(`Sesión validada correctamente`, {
+        status: response.status,
+        email: advisor.email,
+        urlSolicitada: "/api/me/access-status",
+        metodo: "GET",
+      });
+
+      // Renovar loginTime (7 días de vigencia offline)
       try {
         const sessionStr = await storage.getItem<string>("advisor_session");
         if (sessionStr) {
           const session = JSON.parse(sessionStr);
-          // Actualización de compatibilidad a formato envoltorio si no lo tenía:
           const newSession = session.user ? session : { user: session };
           newSession.loginTime = Date.now();
-          newSession.sessionVersion = APP_SESSION_VERSION; // Remachamos la versión de seguridad
+          newSession.sessionVersion = APP_SESSION_VERSION;
           await storage.setItem("advisor_session", JSON.stringify(newSession));
         }
-      } catch (err) {
-        // Ignoramos silentemente si hay error puramente al escribir
+      } catch {
+        // Ignorar error puramente de escritura
       }
 
       return true;
     } catch (e: any) {
-      // Fallo de red genérico. Asumimos siempre que es un fallo de conexión al servidor 
-      // (ej. servidor caído, DNS, sin internet) para evitar falsos positivos de CORS 
-      // que cierren la sesión por accidente.
-      console.warn("Fallo en la red o servidor no disponible. Permitiendo acceso local por caché.", e?.message);
+      console.warn(
+        "Fallo en la red o servidor no disponible. Permitiendo acceso local por caché.",
+        e?.message
+      );
       return true;
     }
   };
 
   const verificarLider = async () => {
-    if (!advisor?.token) return;
+    const activeAdvisor = advisorRef.current || advisor;
+    if (!activeAdvisor?.token) return;
+
+    // API v16: Advisor_Trainee nunca puede llamar a /api/profile-advisors ni /api/team
+    if (activeAdvisor.training) {
+      setIsLider(false);
+      updateEquipoLider([]);
+      return;
+    }
 
     // DEV MODE BYPASS
-    if (advisor.id === "DEV-MODE") {
-      setIsLider(advisor.isLider === true);
-      if (advisor.isLider) {
-        setEquipoLider([{ id: '123e4567-e89b-12d3-a456-426614174000', nombre: 'Mock Asesor Dev' }]);
+    if (activeAdvisor.id === "DEV-MODE") {
+      setIsLider(activeAdvisor.isLider === true);
+      if (activeAdvisor.isLider) {
+        updateEquipoLider([
+          { id: "123e4567-e89b-12d3-a456-426614174000", nombre: "Mock Asesor Dev" },
+        ]);
+      } else {
+        updateEquipoLider([]);
       }
       return;
     }
 
     if (!isOnline) {
-      // Si no hay red, confiamos en la propiedad cacheada en la sesión
-      setIsLider(advisor.isLider === true);
+      setIsLider(activeAdvisor.isLider === true);
       return;
     }
 
-    // NUEVO ENFOQUE API V8:
-    // Evitamos pegarle al endpoint /api/team de forma innecesaria si el usuario no es líder,
-    // ahorrando ancho de banda y tiempos de carga.
-    if (advisor.isLider) {
+    // API Desktop v16: usar GET /api/profile-advisors (ordenado por nombre;
+    // para TeamLeader devuelve subordinados directos; para SuperAdmin incluye todos los Advisors activos)
+    if (activeAdvisor.isLider) {
       setIsLider(true);
       try {
-        const API_BASE_URL = process.env.EXPO_PUBLIC_API_URL || "https://panel.vigvita.com.mx";
-        const res = await fetch(`${API_BASE_URL}/api/team`, {
-          headers: { "Authorization": `Bearer ${advisor.token}` }
+        const res = await apiFetch("/api/profile-advisors", {
+          method: "GET",
+          headers: { Authorization: `Bearer ${activeAdvisor.token}` },
         });
         if (res.status === 200) {
           const data = await res.json();
-          setEquipoLider((data.data || []).map((m: any) => ({ id: m.id, nombre: m.name })));
+          const rawAdvisors = Array.isArray(data?.advisors) ? data.advisors : [];
+          updateEquipoLider(rawAdvisors.map((m: any) => ({ id: m.id, nombre: m.name })));
+        } else if (res.status === 404) {
+          Logger.warn(`GET /api/profile-advisors devolvió 404`, { email: activeAdvisor.email });
         } else {
-          setEquipoLider([]);
+          // En errores transitorios (429/5xx) conservar la lista previamente cargada
+          Logger.warn(`Fallo transitorio en /api/profile-advisors`, { status: res.status });
         }
-      } catch {
-        setEquipoLider([]);
+      } catch (e) {
+        Logger.warn(`Error de red en /api/profile-advisors`, e);
       }
     } else {
       setIsLider(false);
-      setEquipoLider([]);
+      updateEquipoLider([]);
     }
   };
 
-  // Disparar verificación de líder cuando el usuario inicia sesión (o se carga de localforage)
+  // Disparar verificación de líder cuando el usuario inicia sesión (o se carga de storage)
   useEffect(() => {
     if (advisor) {
       verificarLider();
     }
   }, [advisor]);
 
-  // Polling para /api/me/access-status (API v14)
+  // Enforcement local del cutoff de acceso (sin disparar peticiones extra al cambiar accessExpiresAt)
+  useEffect(() => {
+    accessExpiresAtRef.current = accessExpiresAt;
+    if (!advisor?.token || advisor.id === "DEV-MODE" || !accessExpiresAt) return;
+    if (new Date(accessExpiresAt).getTime() < Date.now()) {
+      console.warn("Acceso revocado (Offline Enforce)");
+      Alert.alert("Sesión Terminada", "Tu periodo de acceso ha concluido.");
+      logout();
+    }
+  }, [accessExpiresAt, advisor?.token]);
+
+  // Polling periódico para /api/me/access-status (API v14–v16)
   useEffect(() => {
     if (!advisor?.token) return;
-    if (advisor.id === "DEV-MODE") return; // Bypass dev mode
+    if (advisor.id === "DEV-MODE") return;
 
     const checkAccess = async () => {
-      if (accessExpiresAt) {
-        if (new Date(accessExpiresAt).getTime() < Date.now()) {
+      if (accessExpiresAtRef.current) {
+        if (new Date(accessExpiresAtRef.current).getTime() < Date.now()) {
           console.warn("Acceso revocado (Offline Enforce)");
           Alert.alert("Sesión Terminada", "Tu periodo de acceso ha concluido.");
           logout();
@@ -2138,14 +2642,17 @@ export const FinancialProvider = ({ children }: { children: ReactNode }) => {
       if (!isOnline) return;
 
       try {
-        const API_BASE_URL = process.env.EXPO_PUBLIC_API_URL || "https://panel.vigvita.com.mx";
-        const response = await fetch(`${API_BASE_URL}/api/me/access-status`, {
+        const response = await apiFetch("/api/me/access-status", {
           method: "GET",
-          headers: { "Authorization": `Bearer ${advisor.token}` },
+          headers: { Authorization: `Bearer ${advisor.token}` },
         });
 
         if (response.status === 404) {
           console.warn("Sesión terminada por el servidor (404 access-status).");
+          Logger.warn(`Acceso revocado por el servidor en /api/me/access-status`, {
+            status: response.status,
+            email: advisor.email,
+          });
           Alert.alert("Sesión Terminada", "El servidor ha revocado tu acceso de forma inmediata.");
           logout();
           return;
@@ -2153,7 +2660,9 @@ export const FinancialProvider = ({ children }: { children: ReactNode }) => {
 
         if (response.ok) {
           const data = await response.json();
-          setAccessExpiresAt(data.access_expires_at || null);
+          const cutoff = data.access_expires_at || null;
+          accessExpiresAtRef.current = cutoff;
+          setAccessExpiresAt(cutoff);
         }
       } catch (e) {
         console.warn("Fallo al verificar access-status", e);
@@ -2164,7 +2673,7 @@ export const FinancialProvider = ({ children }: { children: ReactNode }) => {
     const interval = setInterval(checkAccess, 30 * 60 * 1000); // 30 minutos
 
     return () => clearInterval(interval);
-  }, [advisor?.token, isOnline, accessExpiresAt]);
+  }, [advisor?.token, isOnline]);
 
   // --- SETTERS ESTÁNDAR (Igual que antes) ---
   const updatePerfil = (f: keyof PerfilData, v: any) =>
@@ -2304,8 +2813,20 @@ export const FinancialProvider = ({ children }: { children: ReactNode }) => {
     };
     let nuevaLista = [...listaClientes];
 
-    // Buscar el prospecto original para preservar el asesor asignado si no se ha seleccionado uno nuevo explícitamente
-    const prospectoOriginal = currentClientId ? (listaClientes.find((c) => c.id === currentClientId) || listaNube.find((c) => c.id === currentClientId)) : null;
+    // Buscar el prospecto original para preservar el asesor asignado original (excepción SuperAdmin v16)
+    const prospectoOriginal = currentClientId
+      ? listaClientes.find((c) => c.id === currentClientId) ||
+        listaNube.find((c) => c.id === currentClientId)
+      : null;
+
+    const resolvedOriginalAsesor = hydrateAsesorAsignado(
+      prospectoOriginal?.asesorAsignado,
+      prospectoOriginal?.serverId || currentServerId || undefined
+    );
+    // Para ADNs existentes priorizar su asesor original; solo usar asesorSeleccionadoGlobal en ADNs nuevos
+    const asesorFinal = prospectoOriginal
+      ? resolvedOriginalAsesor
+      : asesorSeleccionadoGlobal || undefined;
 
     // 1. Crear Objeto Cliente
     const nuevoClienteObj: ClienteGuardado = {
@@ -2316,7 +2837,7 @@ export const FinancialProvider = ({ children }: { children: ReactNode }) => {
       estatusAdquisicion: estadoOverride || "en_espera",
       tiposCierre: polizasOverride || [],
       accompanimentStatus: acompOverride || (prospectoOriginal ? prospectoOriginal.accompanimentStatus : "unaccompanied"),
-      asesorAsignado: asesorSeleccionadoGlobal || prospectoOriginal?.asesorAsignado || undefined,
+      asesorAsignado: asesorFinal,
       sincronizado: advisor?.training ? true : false, // Los ADNs de práctica nacen 'sincronizados' para que el motor de red los ignore para siempre
       data: dataSnapshot,
     };
@@ -2339,10 +2860,13 @@ export const FinancialProvider = ({ children }: { children: ReactNode }) => {
           nuevaLista[index].tiposCierre ||
           (nuevaLista[index].tipoCierre ? [nuevaLista[index].tipoCierre] : []);
 
-        // Preservar metadatos vitales para evitar duplicados en V3 y reseteo de fechas
+        // Preservar metadatos vitales para evitar duplicados y pérdida de advisor_id
         nuevoClienteObj.serverId = nuevaLista[index].serverId || currentServerId || undefined;
         nuevoClienteObj.fechaCreacion = nuevaLista[index].fechaCreacion;
-        nuevoClienteObj.asesorAsignado = nuevaLista[index].asesorAsignado; // Propiedad de líder
+        nuevoClienteObj.asesorAsignado = hydrateAsesorAsignado(
+          nuevaLista[index].asesorAsignado,
+          nuevoClienteObj.serverId
+        );
 
         nuevaLista[index] = nuevoClienteObj;
       } else {
@@ -2352,6 +2876,13 @@ export const FinancialProvider = ({ children }: { children: ReactNode }) => {
     } else {
       nuevaLista.push(nuevoClienteObj);
       setCurrentClientId(nuevoClienteObj.id);
+      if (asesorSeleccionadoGlobal) {
+        setAsesorSeleccionadoGlobal(null);
+      }
+    }
+
+    if (nuevoClienteObj.serverId && nuevoClienteObj.asesorAsignado?.id) {
+      rememberAdnAdvisor(nuevoClienteObj.serverId, nuevoClienteObj.asesorAsignado);
     }
 
     setListaClientes(nuevaLista);
@@ -2396,6 +2927,59 @@ export const FinancialProvider = ({ children }: { children: ReactNode }) => {
     await storage.setItem("clientes_db", JSON.stringify(nuevaLista));
   };
 
+  // --- HELPER: Garantiza tener los datos completos antes de re-subir un perfil solo-nube ---
+  // Evita sobrescribir/borrar el `data` del servidor cuando el usuario cambia estatus o
+  // acompañamiento desde el Tablero sobre un perfil que solo tenía el resumen de GET /api/profiles.
+  const hydrateCloudClientFullData = async (cloudMatch: ClienteGuardado): Promise<any | null> => {
+    if (cloudMatch.data && cloudMatch.data.perfil) {
+      return cloudMatch.data;
+    }
+
+    // 1. Intentar descargar el perfil completo desde el servidor
+    if (cloudMatch.serverId && isOnline && advisor?.token && !advisor.training && advisor.id !== "DEV-MODE") {
+      try {
+        const res = await apiFetch(`/api/profiles/${cloudMatch.serverId}`, {
+          method: "GET",
+          headers: { Authorization: `Bearer ${advisor.token}` },
+        });
+        if (res.ok) {
+          const fullProfile = await res.json();
+          let parsedData: any = {};
+          if (typeof fullProfile.data === "string" && fullProfile.data.trim().length > 0) {
+            parsedData = JSON.parse(fullProfile.data);
+          } else if (typeof fullProfile.data === "object" && fullProfile.data !== null) {
+            parsedData = fullProfile.data;
+          }
+          if (parsedData?.profile && Object.keys(parsedData.profile).length > 0) {
+            const unmapped = unmapClientData(parsedData);
+            if ((!unmapped.referidos || unmapped.referidos.length === 0) && cloudMatch.data?.referidos?.length > 0) {
+              unmapped.referidos = cloudMatch.data.referidos;
+            }
+            return unmapped;
+          }
+        }
+      } catch (e) {
+        Logger.warn(`No se pudo descargar detalle completo antes de actualizar metadatos de ${cloudMatch.nombre}`, e);
+      }
+    }
+
+    // 2. Fallback: revisar copia completa en archivo muerto local
+    if (cloudMatch.serverId) {
+      try {
+        const rawArchive = await storage.getItem<string>("clientes_archive_db");
+        const archiveDB: ClienteGuardado[] = rawArchive ? JSON.parse(rawArchive) : [];
+        const match = archiveDB.find((c) => c.serverId === cloudMatch.serverId);
+        if (match?.data?.perfil) {
+          return match.data;
+        }
+      } catch {
+        // Ignorar error de lectura de archivo muerto
+      }
+    }
+
+    return null;
+  };
+
   const actualizarEstadoProspecto = async (
     id: string,
     estadoEnums: "en_espera" | "descartado" | "cierre",
@@ -2424,17 +3008,25 @@ export const FinancialProvider = ({ children }: { children: ReactNode }) => {
       forceSync(nuevaLista);
     } else {
       // El prospecto solo existe en la nube (purgado de local).
-      // Re-materializarlo en listaClientes con el nuevo estado.
+      // Descargar sus datos completos primero para NO sobrescribir el perfil con campos vacíos.
       const cloudMatch = listaNube.find((c) => c.id === id || c.serverId === id);
       if (cloudMatch) {
+        const fullData = await hydrateCloudClientFullData(cloudMatch);
+        if (!fullData) {
+          showAlert("No se pudieron descargar los datos completos del prospecto para actualizar su estatus sin perder información. Verifica tu conexión e intenta de nuevo.");
+          return;
+        }
+
         const rematerialized: ClienteGuardado = {
           ...cloudMatch,
+          data: fullData,
+          asesorAsignado: hydrateAsesorAsignado(cloudMatch.asesorAsignado, cloudMatch.serverId),
           estatusAdquisicion: estadoEnums,
           tiposCierre: tiposPoliza || [],
           estatusCierre: estadoEnums === "cierre",
           tipoCierre:
             tiposPoliza && tiposPoliza.length > 0 ? tiposPoliza[0] : undefined,
-          sincronizado: false, // Marcar para que se re-suba al servidor
+          sincronizado: advisor?.training ? true : false, // Marcar para que se re-suba al servidor
         };
         const nuevaLista = [...listaClientes, rematerialized];
         setListaClientes(nuevaLista);
@@ -2444,7 +3036,7 @@ export const FinancialProvider = ({ children }: { children: ReactNode }) => {
         setListaNube((prev) =>
           prev.map((c) =>
             (c.id === id || c.serverId === id)
-              ? { ...c, estatusAdquisicion: estadoEnums, tiposCierre: tiposPoliza || [] }
+              ? { ...c, data: fullData, estatusAdquisicion: estadoEnums, tiposCierre: tiposPoliza || [] }
               : c
           )
         );
@@ -2474,13 +3066,21 @@ export const FinancialProvider = ({ children }: { children: ReactNode }) => {
       await storage.setItem("clientes_db", JSON.stringify(nuevaLista));
       forceSync(nuevaLista);
     } else {
-      // Cloud-only: re-materializar en local con el nuevo acompañamiento
+      // Cloud-only: descargar datos completos primero para evitar pérdida de datos al sincronizar
       const cloudMatch = listaNube.find((c) => c.id === id || c.serverId === id);
       if (cloudMatch) {
+        const fullData = await hydrateCloudClientFullData(cloudMatch);
+        if (!fullData) {
+          showAlert("No se pudieron descargar los datos completos del prospecto para actualizar su acompañamiento sin perder información. Verifica tu conexión e intenta de nuevo.");
+          return;
+        }
+
         const rematerialized: ClienteGuardado = {
           ...cloudMatch,
+          data: fullData,
+          asesorAsignado: hydrateAsesorAsignado(cloudMatch.asesorAsignado, cloudMatch.serverId),
           accompanimentStatus: status,
-          sincronizado: false,
+          sincronizado: advisor?.training ? true : false,
         };
         const nuevaLista = [...listaClientes, rematerialized];
         setListaClientes(nuevaLista);
@@ -2489,7 +3089,7 @@ export const FinancialProvider = ({ children }: { children: ReactNode }) => {
         setListaNube((prev) =>
           prev.map((c) =>
             (c.id === id || c.serverId === id)
-              ? { ...c, accompanimentStatus: status }
+              ? { ...c, data: fullData, accompanimentStatus: status }
               : c
           )
         );
@@ -2498,14 +3098,49 @@ export const FinancialProvider = ({ children }: { children: ReactNode }) => {
     }
   };
 
+  const actualizarAsesorProspecto = async (
+    id: string,
+    nuevoAsesor: { id: string; nombre: string } | null
+  ) => {
+    const target = listaClientesRef.current.find((c) => c.id === id);
+    if (!target || target.sincronizado || target.serverId) {
+      return;
+    }
+
+    const nuevaLista = listaClientesRef.current.map((c) => {
+      if (c.id === id) {
+        return {
+          ...c,
+          asesorAsignado: nuevoAsesor ? { id: nuevoAsesor.id, nombre: nuevoAsesor.nombre } : undefined,
+          sincronizado: advisorRef.current?.training ? true : false,
+        };
+      }
+      return c;
+    });
+
+    listaClientesRef.current = nuevaLista;
+    setListaClientes(nuevaLista);
+    await storage.setItem("clientes_db", JSON.stringify(nuevaLista));
+    setSyncStatus("pending");
+
+    Logger.info(`Asesor asignado actualizado en prospecto local`, {
+      id,
+      nombre: target.nombre,
+      asesorAnterior: target.asesorAsignado || null,
+      asesorNuevo: nuevoAsesor || null,
+    });
+
+    forceSync(nuevaLista);
+  };
+
   const cargarProspecto = async (cliente: ClienteGuardado) => {
     let d = cliente.data;
 
-    // API v10 — LAZY LOADING: Si es un perfil de la nube (sincronizado + serverId)
-    // y no tiene datos cargados aún, obtenerlos bajo demanda.
+    // API v10+ — LAZY LOADING: Si es un perfil de la nube (sincronizado + serverId)
+    // y no tiene datos cargados aún, obtenerlos bajo demanda (nunca para trainees en v16).
     const hasData = d && Object.keys(d).length > 0 && d.perfil;
 
-    if (!hasData && cliente.serverId) {
+    if (!hasData && cliente.serverId && !advisor?.training) {
       // --- GUARDIA OFFLINE: Si no hay conexión o token, NO cargamos datos vacíos ---
       if (!isOnline || !advisor?.token) {
         showAlert("Sin conexión a internet. No se pueden obtener los datos completos de este prospecto. Conéctate a internet e intenta de nuevo.");
@@ -2515,10 +3150,9 @@ export const FinancialProvider = ({ children }: { children: ReactNode }) => {
       setIsFetchingCloud(true);
       let fetchSucceeded = false;
       try {
-        const API_BASE_URL = process.env.EXPO_PUBLIC_API_URL || "https://panel.vigvita.com.mx";
-        const res = await fetch(`${API_BASE_URL}/api/profiles/${cliente.serverId}`, {
+        const res = await apiFetch(`/api/profiles/${cliente.serverId}`, {
           method: "GET",
-          headers: { "Authorization": `Bearer ${advisor.token}` }
+          headers: { Authorization: `Bearer ${advisor.token}` },
         });
 
         if (res.ok) {
@@ -2530,54 +3164,75 @@ export const FinancialProvider = ({ children }: { children: ReactNode }) => {
             } else if (typeof fullProfile.data === 'object' && fullProfile.data !== null) {
               parsedData = fullProfile.data;
             }
-            // Si parsedData sigue vacío después de parsear, es un perfil sin datos reales
           } catch (e) {
             console.error("Error parsing profile data from server:", e);
             parsedData = {};
           }
 
-          // Verificar si el servidor devolvió datos reales (al menos debe tener profile/profile.phone/etc.)
           const hasRealData = parsedData.profile && Object.keys(parsedData.profile).length > 0;
 
-          if (!hasRealData) {
-            // El servidor respondió 200 pero data está vacía/corrupta/null.
-            // Esto puede pasar si el blob encriptado se dañó en el servidor.
-            console.warn("[cargarProspecto] Servidor devolvió 200 pero data vacía para:", cliente.serverId);
-            showAlert(
-              "Los datos completos de este prospecto no están disponibles en el servidor. " +
-              ""
-            );
-            // Cargar solo lo que tenemos del resumen (nombre + referidos)
-            // sin sobrescribir el formulario con datos vacíos
-            setCurrentClientId(cliente.id);
-            setCurrentServerId(cliente.serverId || null);
-            setNombreCliente(cliente.nombre);
-            // Preservar referidos del resumen de listaNube si el servidor no devolvió datos
-            const resumenReferidos = cliente.data?.referidos || [];
-            setReferidos(resumenReferidos);
-            // Resetear el resto a defaults limpios para que el usuario sepa que están vacíos
-            setPerfil(initialPerfil);
-            setHijos([]);
-            setJubilacion(initialJubilacion);
-            setActivos(initialActivos);
-            setPasivos(initialPasivos);
-            setSeguros(initialSeguros);
-            setIngresos(initialIngresos);
-            setGastosBasicos(initialGastosBasicos);
-            setGastosVariables(initialGastosVariables);
-            setFallecimiento(initialFallecimiento);
-            setDetalle(initialDetalle);
-            setCita(initialCita);
-            setNotas("");
-            setPiramideLevels([...INITIAL_PIRAMIDE_LEVELS]);
-            return; // No continuar con el flujo normal
+          if (fullProfile.needs_resync === true || !hasRealData) {
+            // API v16: el servidor no pudo devolver el detalle (needs_resync: true o data vacía).
+            // Antes de mostrar vacío, intentar rescatar copia local desde archivo muerto y re-subirla.
+            try {
+              const rawArchive = await storage.getItem<string>("clientes_archive_db");
+              const archiveDB: ClienteGuardado[] = rawArchive ? JSON.parse(rawArchive) : [];
+              const archiveIdx = archiveDB.findIndex((c) => c.serverId === cliente.serverId);
+
+              if (archiveIdx !== -1 && archiveDB[archiveIdx].data?.perfil) {
+                const rescued = { ...archiveDB[archiveIdx], sincronizado: false };
+                archiveDB.splice(archiveIdx, 1);
+                await storage.setItem("clientes_archive_db", JSON.stringify(archiveDB));
+
+                setListaClientes((prev) => {
+                  const alreadyInLocal = prev.some((c) => c.serverId === rescued.serverId);
+                  const nextList = alreadyInLocal ? prev : [...prev, rescued];
+                  storage.setItem("clientes_db", JSON.stringify(nextList)).catch(console.error);
+                  return nextList;
+                });
+
+                d = rescued.data;
+                fetchSucceeded = true;
+                Logger.info(`[needs_resync] Copia local rescatada de archivo muerto al abrir ${cliente.nombre}`);
+                setTimeout(() => {
+                  forceSync(undefined, true);
+                }, 1500);
+              }
+            } catch (archErr) {
+              console.warn("Error consultando archivo muerto en cargarProspecto:", archErr);
+            }
+
+            if (!fetchSucceeded) {
+              console.warn("[cargarProspecto] Servidor devolvió 200 pero sin datos completos para:", cliente.serverId);
+              showAlert("Los datos completos de este prospecto no están disponibles en el servidor.");
+              setAsesorSeleccionadoGlobal(null);
+              setCurrentClientId(cliente.id);
+              setCurrentServerId(cliente.serverId || null);
+              setNombreCliente(cliente.nombre);
+              const resumenReferidos = cliente.data?.referidos || [];
+              setReferidos(resumenReferidos);
+              setPerfil(initialPerfil);
+              setHijos([]);
+              setJubilacion(initialJubilacion);
+              setActivos(initialActivos);
+              setPasivos(initialPasivos);
+              setSeguros(initialSeguros);
+              setIngresos(initialIngresos);
+              setGastosBasicos(initialGastosBasicos);
+              setGastosVariables(initialGastosVariables);
+              setFallecimiento(initialFallecimiento);
+              setDetalle(initialDetalle);
+              setCita(initialCita);
+              setNotas("");
+              setPiramideLevels([...INITIAL_PIRAMIDE_LEVELS]);
+              return;
+            }
+          } else {
+            d = unmapClientData(parsedData);
+            fetchSucceeded = true;
           }
 
-          d = unmapClientData(parsedData);
-          fetchSucceeded = true;
-
-          // Preservar referidos: si el servidor no devolvió referidos pero el resumen sí los tiene,
-          // usar los del resumen para no perderlos
+          // Preservar referidos: si el servidor no devolvió referidos pero el resumen sí los tiene
           if ((!d.referidos || d.referidos.length === 0) && cliente.data?.referidos?.length > 0) {
             d.referidos = cliente.data.referidos;
           }
@@ -2587,26 +3242,34 @@ export const FinancialProvider = ({ children }: { children: ReactNode }) => {
             prev.map((c) => c.serverId === cliente.serverId ? {
               ...c,
               data: d,
-              accompanimentStatus: fullProfile.accompaniment_status || "unaccompanied"
+              accompanimentStatus: fullProfile.accompaniment_status || c.accompanimentStatus || "unaccompanied"
             } : c)
           );
+        } else if (res.status === 429) {
+          showAlert("El servidor está ocupado (límite de peticiones). Intenta abrir el prospecto nuevamente en unos segundos.");
+          return;
         } else if (res.status === 401 || res.status === 403 || res.status === 404) {
           showAlert(`No se pudo obtener el perfil del servidor (${res.status}).`);
-          return; // Abortar — no cargamos datos vacíos
+          return;
         } else {
           showAlert(`Error al obtener el perfil (${res.status}). Intenta de nuevo.`);
-          return; // Abortar — no cargamos datos vacíos
+          return;
         }
       } catch (e: any) {
         console.error("Error al cargar detalle del perfil:", e);
         showAlert("Error de red al obtener los datos del prospecto. Verifica tu conexión a internet.");
-        return; // Abortar — no cargamos datos vacíos al formulario
+        return;
       } finally {
         setIsFetchingCloud(false);
       }
 
-      // Doble seguridad: si por alguna razón el fetch no fue exitoso, no cargamos
       if (!fetchSucceeded) return;
+    }
+
+    // Limpiar selección global de asesor al abrir un prospecto existente para no sobreescribir su advisor_id
+    setAsesorSeleccionadoGlobal(null);
+    if (cliente.serverId && cliente.asesorAsignado?.id) {
+      rememberAdnAdvisor(cliente.serverId, cliente.asesorAsignado);
     }
 
     // Solo modificamos el estado del formulario si tenemos datos reales
@@ -2660,27 +3323,24 @@ export const FinancialProvider = ({ children }: { children: ReactNode }) => {
     //     y el usuario tiene sesión activa y no está en modo capacitación ---
     if (serverIdToDelete && advisor?.token && !advisor.training) {
       try {
-        const API_BASE_URL = process.env.EXPO_PUBLIC_API_URL || "https://panel.vigvita.com.mx";
-        const res = await fetch(`${API_BASE_URL}/api/profiles/${serverIdToDelete}`, {
+        const res = await apiFetch(`/api/profiles/${serverIdToDelete}`, {
           method: "DELETE",
-          headers: { "Authorization": `Bearer ${advisor.token}` },
+          headers: { Authorization: `Bearer ${advisor.token}` },
         });
 
         if (res.ok || res.status === 404) {
           // 200 = eliminado en servidor. 404 = ya no existía. Ambos son éxito.
-          // Limpiar de listaNube para que no reaparezca en el tablero
           setListaNube((prev) => prev.filter((c) => c.serverId !== serverIdToDelete));
           setTimeout(() => showAlert("Prospecto eliminado exitosamente."), 100);
         } else if (res.status === 401 || res.status === 403) {
           // Token inválido o expirado — forzar logout
           await logout();
+        } else if (res.status === 429) {
+          setTimeout(() => showAlert("Prospecto eliminado localmente. El servidor estuvo ocupado (429); intenta refrescar tus ADNs."), 100);
         } else {
-          // Error inesperado del servidor (5xx, etc.)
-          // El borrado local ya ocurrió; informar sin revertir
           setTimeout(() => showAlert("Prospecto eliminado localmente. No se pudo confirmar la eliminación en el servidor, intenta sincronizar."), 100);
         }
-      } catch (e) {
-        // Sin internet o error de red — el borrado local ya ocurrió
+      } catch {
         setTimeout(() => showAlert("Prospecto eliminado de tu dispositivo. Sin conexión: el servidor será notificado cuando recuperes internet."), 100);
       }
     } else {
@@ -2843,6 +3503,7 @@ export const FinancialProvider = ({ children }: { children: ReactNode }) => {
         toggleCierreProspecto,
         actualizarEstadoProspecto, // <--- Nueva función expuesta
         actualizarAcompanamiento,
+        actualizarAsesorProspecto,
         importarRespaldo, // <--- Para respaldos
 
         // Líder de Equipo

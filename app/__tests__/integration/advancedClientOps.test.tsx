@@ -13,6 +13,7 @@ import { FinancialProvider, useFinancialData } from '../../context/FinancialCont
 
 describe('Advanced Client Operations', () => {
   let ctx: ReturnType<typeof useFinancialData>;
+  let originalFetch: typeof global.fetch;
 
   const TestConsumer = () => {
     ctx = useFinancialData();
@@ -20,8 +21,13 @@ describe('Advanced Client Operations', () => {
   };
 
   beforeEach(() => {
-    (global as any).__clearTestStorage();
+    originalFetch = global.fetch;
+    global.__clearTestStorage?.();
     jest.clearAllMocks();
+  });
+
+  afterEach(() => {
+    global.fetch = originalFetch;
   });
 
   it('actualizarAcompanamiento actualiza prospecto local y rematerializa si es solo-nube', async () => {
@@ -236,6 +242,100 @@ describe('Advanced Client Operations', () => {
       ctx.toggleOnlineSimulation();
     });
     expect(ctx.isOnline).toBe(initialOnline);
+
+    root.unmount();
+  });
+
+  it('actualizarEstadoProspecto y actualizarAcompanamiento en perfil solo-nube descargan detalle completo para NO borrar datos del servidor', async () => {
+    const cloudUuid = '44444444-4444-4444-8444-444444444444';
+    const capturedPosts: any[] = [];
+    const mockStorage = require('@react-native-async-storage/async-storage');
+    await mockStorage.setItem(
+      'advisor_session',
+      JSON.stringify({
+        user: {
+          id: 'ADV-REAL',
+          nombre: 'Asesor Real',
+          email: 'real@vigvita.com',
+          token: 'real-tok',
+          training: false,
+          isLider: false,
+        },
+        loginTime: Date.now(),
+        sessionVersion: 2,
+      })
+    );
+
+    global.fetch = jest.fn(async (url: string, opts?: any) => {
+      if (url.includes('/api/profiles') && !url.includes('/api/profiles/') && opts?.method === 'GET') {
+        return {
+          ok: true,
+          status: 200,
+          json: async () => ({
+            profiles: [
+              {
+                id: cloudUuid,
+                client_name: 'Cliente Nube Solo Resumen',
+                status: 'pending',
+                accompaniment_status: 'unaccompanied',
+                created_at: '2026-04-22T00:00:00Z',
+                referrals: [],
+              },
+            ],
+          }),
+        };
+      }
+      if (url.includes(`/api/profiles/${cloudUuid}`) && opts?.method === 'GET') {
+        return {
+          ok: true,
+          status: 200,
+          json: async () => ({
+            id: cloudUuid,
+            client_name: 'Cliente Nube Solo Resumen',
+            data: {
+              profile: { phone: '5511223344', occupation: 'Médico' },
+              assets: { savings: 900000 },
+              notes: 'Datos valiosos que NO deben borrarse',
+            },
+          }),
+        };
+      }
+      if (url.includes('/api/profiles/new') && opts?.method === 'POST') {
+        capturedPosts.push(JSON.parse(opts.body));
+        return { ok: true, status: 201, json: async () => ({ data: [] }) };
+      }
+      return { ok: true, status: 200, json: async () => ({ access_expires_at: null }) };
+    }) as jest.Mock;
+
+    let root: any;
+    await act(async () => {
+      root = renderer.create(
+        <FinancialProvider>
+          <TestConsumer />
+        </FinancialProvider>
+      );
+    });
+
+    await act(async () => {
+      await ctx.fetchSincronizadosNube();
+    });
+    expect(ctx.listaNube).toHaveLength(1);
+    expect(ctx.listaNube[0].data.perfil).toBeUndefined(); // Solo resumen inicialmente
+
+    // Cambiar estado desde el tablero SIN haber abierto el prospecto
+    await act(async () => {
+      await ctx.actualizarEstadoProspecto(cloudUuid, 'cierre', ['Vida']);
+    });
+
+    expect(capturedPosts.length).toBeGreaterThan(0);
+    const sent = capturedPosts[0].clients[0];
+    expect(sent.id).toBe(cloudUuid);
+    expect(sent.acquisition_status).toBe('completed');
+    // CRÍTICO: los datos completos del perfil sobrevivieron intactos
+    expect(sent.data.profile.phone).toBe('5511223344');
+    expect(sent.data.profile.occupation).toBe('Médico');
+    expect(sent.data.assets.savings).toBe(900000);
+    expect(sent.data.notes).toBe('Datos valiosos que NO deben borrarse');
 
     root.unmount();
   });

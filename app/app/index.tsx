@@ -72,11 +72,18 @@ export default function LoginScreen() {
                 case 'missing_required_fields':
                     setErrorMessage("Faltan campos requeridos.");
                     break;
+                case 'rate_limited':
+                    setErrorMessage("Demasiados intentos. Espera unos segundos e intenta de nuevo.");
+                    break;
                 case 'network_error':
                     setErrorMessage("Error de red. Verifica tu conexión.");
                     break;
                 default:
-                    setErrorMessage("Error interno al iniciar sesión.");
+                    if (result.error && result.error.toLowerCase().includes('red')) {
+                        setErrorMessage("Error de red. Verifica tu conexión.");
+                    } else {
+                        setErrorMessage("Error interno al iniciar sesión.");
+                    }
             }
         }
     };

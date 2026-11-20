@@ -6,21 +6,31 @@ global.__DEV__ = true;
 
 
 // 3. Mock AsyncStorage with in-memory implementation
-const asyncStorageStore = {};
+const mockAsyncStorageStore = {};
+const mockAsyncSetItem = async (key, value) => { mockAsyncStorageStore[key] = value; };
+const mockAsyncGetItem = async (key) => mockAsyncStorageStore[key] ?? null;
+const mockAsyncRemoveItem = async (key) => { delete mockAsyncStorageStore[key]; };
+const mockAsyncClear = async () => { Object.keys(mockAsyncStorageStore).forEach(k => delete mockAsyncStorageStore[k]); };
+
 jest.mock('@react-native-async-storage/async-storage', () => ({
-  setItem: jest.fn(async (key, value) => { asyncStorageStore[key] = value; }),
-  getItem: jest.fn(async (key) => asyncStorageStore[key] ?? null),
-  removeItem: jest.fn(async (key) => { delete asyncStorageStore[key]; }),
-  clear: jest.fn(async () => { Object.keys(asyncStorageStore).forEach(k => delete asyncStorageStore[k]); }),
+  setItem: jest.fn((key, value) => mockAsyncSetItem(key, value)),
+  getItem: jest.fn((key) => mockAsyncGetItem(key)),
+  removeItem: jest.fn((key) => mockAsyncRemoveItem(key)),
+  clear: jest.fn(() => mockAsyncClear()),
 }));
 
 // 4. Mock localforage with in-memory implementation
-const localforageStore = {};
+const mockLocalforageStore = {};
+const mockLocalforageSetItem = async (key, value) => { mockLocalforageStore[key] = value; };
+const mockLocalforageGetItem = async (key) => mockLocalforageStore[key] ?? null;
+const mockLocalforageRemoveItem = async (key) => { delete mockLocalforageStore[key]; };
+const mockLocalforageClear = async () => { Object.keys(mockLocalforageStore).forEach(k => delete mockLocalforageStore[k]); };
+
 jest.mock('localforage', () => ({
-  setItem: jest.fn(async (key, value) => { localforageStore[key] = value; }),
-  getItem: jest.fn(async (key) => localforageStore[key] ?? null),
-  removeItem: jest.fn(async (key) => { delete localforageStore[key]; }),
-  clear: jest.fn(async () => { Object.keys(localforageStore).forEach(k => delete localforageStore[k]); }),
+  setItem: jest.fn((key, value) => mockLocalforageSetItem(key, value)),
+  getItem: jest.fn((key) => mockLocalforageGetItem(key)),
+  removeItem: jest.fn((key) => mockLocalforageRemoveItem(key)),
+  clear: jest.fn(() => mockLocalforageClear()),
 }));
 
 
@@ -62,10 +72,20 @@ global.fetch = jest.fn(async (url) => {
   };
 });
 
-// 9. Helper to clear storage between tests
+// 9. Helper to clear storage AND restore default storage implementations between tests
 global.__clearTestStorage = () => {
-  Object.keys(asyncStorageStore).forEach(k => delete asyncStorageStore[k]);
-  Object.keys(localforageStore).forEach(k => delete localforageStore[k]);
+  Object.keys(mockAsyncStorageStore).forEach(k => delete mockAsyncStorageStore[k]);
+  Object.keys(mockLocalforageStore).forEach(k => delete mockLocalforageStore[k]);
+  const asyncMock = require('@react-native-async-storage/async-storage');
+  asyncMock.setItem.mockImplementation((key, value) => mockAsyncSetItem(key, value));
+  asyncMock.getItem.mockImplementation((key) => mockAsyncGetItem(key));
+  asyncMock.removeItem.mockImplementation((key) => mockAsyncRemoveItem(key));
+  asyncMock.clear.mockImplementation(() => mockAsyncClear());
+  const lfMock = require('localforage');
+  lfMock.setItem.mockImplementation((key, value) => mockLocalforageSetItem(key, value));
+  lfMock.getItem.mockImplementation((key) => mockLocalforageGetItem(key));
+  lfMock.removeItem.mockImplementation((key) => mockLocalforageRemoveItem(key));
+  lfMock.clear.mockImplementation(() => mockLocalforageClear());
 };
 
 // 10. Safe mock for jest.runAllTimers to avoid warnings when fake timers aren't active

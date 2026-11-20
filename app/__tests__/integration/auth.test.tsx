@@ -141,10 +141,10 @@ describe('Auth — Login, Logout, Session Management', () => {
           json: () => Promise.resolve({ token: 'leader-token', name: 'Leader', training: false, is_leader: true }),
         });
       }
-      if (url.includes('/api/team')) {
+      if (url.includes('/api/profile-advisors')) {
         return Promise.resolve({
           ok: true, status: 200,
-          json: () => Promise.resolve({ data: [{ id: 'adv-1', name: 'Asesor 1' }] }),
+          json: () => Promise.resolve({ advisors: [{ id: '123e4567-e89b-12d3-a456-426614174000', name: 'Asesor 1' }] }),
         });
       }
       return Promise.resolve({ ok: true, status: 200, json: () => Promise.resolve({ profiles: [] }), text: () => Promise.resolve('') });
@@ -184,6 +184,21 @@ describe('Auth — Login, Logout, Session Management', () => {
     expect(mockStorage.removeItem).toHaveBeenCalledWith('advisor_session');
   });
 
+  it('Logout limpia listaNube, equipoLider, isLider y accessExpiresAt en memoria', async () => {
+    await act(async () => { await ctx.bypassLoginForDev('lider'); });
+    expect(ctx.isLider).toBe(true);
+    expect(ctx.equipoLider.length).toBeGreaterThan(0);
+
+    await act(async () => { await ctx.logout(); });
+    await act(async () => { jest.runAllTimers(); });
+
+    expect(ctx.advisor).toBeNull();
+    expect(ctx.isLider).toBe(false);
+    expect(ctx.equipoLider).toEqual([]);
+    expect(ctx.listaNube).toEqual([]);
+    expect(ctx.accessExpiresAt).toBeNull();
+  });
+
   // --- BYPASS DEV LOGIN ---
   it('bypassLoginForDev("asesor") setea DEV-MODE', async () => {
     await act(async () => { await ctx.bypassLoginForDev('asesor'); });
@@ -221,10 +236,17 @@ describe('Auth — Login, Logout, Session Management', () => {
     // fetch should NOT have been called for DEV-MODE
   });
 
-  it('validateSession renueva loginTime al validar exitosamente', async () => {
+  it('validateSession usa GET /api/me/access-status y renueva loginTime al validar exitosamente', async () => {
+    const calledUrls: string[] = [];
     global.fetch = jest.fn((url: string) => {
-      if (url.includes('/api/profiles/new')) {
-        return Promise.resolve({ ok: false, status: 422, text: () => Promise.resolve('') });
+      calledUrls.push(url);
+      if (url.includes('/api/me/access-status')) {
+        return Promise.resolve({
+          ok: true,
+          status: 200,
+          json: () => Promise.resolve({ access_expires_at: null }),
+          text: () => Promise.resolve('{"access_expires_at":null}'),
+        });
       }
       return Promise.resolve({ ok: true, status: 200, json: () => Promise.resolve({}), text: () => Promise.resolve('') });
     }) as jest.Mock;
@@ -243,6 +265,7 @@ describe('Auth — Login, Logout, Session Management', () => {
     root = await mountProvider();
     await act(async () => { jest.runAllTimers(); });
 
+    calledUrls.length = 0;
     let valid: boolean;
     await act(async () => {
       valid = await ctx.validateSession();
@@ -250,13 +273,67 @@ describe('Auth — Login, Logout, Session Management', () => {
     await act(async () => { jest.runAllTimers(); });
 
     expect(valid!).toBe(true);
+    expect(calledUrls.some((u) => u.includes('/api/me/access-status'))).toBe(true);
+    expect(calledUrls.some((u) => u.includes('/api/profiles/new'))).toBe(false);
+    expect(calledUrls.some((u) => u.includes('/app/d/u.json'))).toBe(false);
 
-    // Check that loginTime was updated
+    // Check that loginTime was unconditionally persisted
     const sessionSaves = mockStorage.setItem.mock.calls.filter((c: any) => c[0] === 'advisor_session');
-    if (sessionSaves.length > 0) {
-      const lastSave = JSON.parse(sessionSaves[sessionSaves.length - 1][1]);
-      expect(lastSave.loginTime).toBeGreaterThan(oldTime);
-    }
+    expect(sessionSaves.length).toBeGreaterThan(0);
+    const lastSave = JSON.parse(sessionSaves[sessionSaves.length - 1][1]);
+    expect(lastSave.loginTime).toBeGreaterThan(oldTime);
+  });
+
+  it('validateSession para Advisor_Trainee usa GET /api/me/access-status y hace logout en 404 text/plain', async () => {
+    const calledUrls: string[] = [];
+    global.fetch = jest.fn((url: string) => {
+      calledUrls.push(url);
+      if (url.includes('/api/me/access-status')) {
+        return Promise.resolve({
+          ok: false,
+          status: 404,
+          headers: new Map([['content-type', 'text/plain']]),
+          text: () => Promise.resolve('Not Found'),
+        });
+      }
+      return Promise.resolve({ ok: true, status: 200, json: () => Promise.resolve({ status: 'success' }) });
+    }) as jest.Mock;
+
+    const mockStorage = require('@react-native-async-storage/async-storage');
+    mockStorage.getItem.mockImplementation(async (key: string) => {
+      if (key === 'advisor_session') {
+        return JSON.stringify(FIXTURES.SESSION(FIXTURES.ADVISOR_TRAINING));
+      }
+      return null;
+    });
+
+    root.unmount();
+    root = await mountProvider();
+    await act(async () => { jest.runAllTimers(); });
+
+    expect(calledUrls.some((u) => u.includes('/api/me/access-status'))).toBe(true);
+    expect(calledUrls.some((u) => u.includes('/app/d/u.json'))).toBe(false);
+    expect(calledUrls.some((u) => u.includes('/api/profiles'))).toBe(false);
+    expect(ctx.advisor).toBeNull();
+  });
+
+  it('Login maneja 429 Too Many Requests con reintento y retorna rate_limited si persiste', async () => {
+    global.fetch = jest.fn(() =>
+      Promise.resolve({
+        ok: false,
+        status: 429,
+        headers: new Map([['content-type', 'text/plain']]),
+        text: () => Promise.resolve('Too Many Requests'),
+      })
+    ) as jest.Mock;
+
+    let result: any;
+    await act(async () => {
+      result = await ctx.login('carlos@vigvita.com', 'pass');
+    });
+
+    expect(result.success).toBe(false);
+    expect(result.error).toBe('rate_limited');
   });
 
   // --- SESSION EXPIRY ---

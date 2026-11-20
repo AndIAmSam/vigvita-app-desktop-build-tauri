@@ -17,6 +17,7 @@ import { Picker } from "@react-native-picker/picker";
 import { CustomPicker } from "../../components/CustomPicker";
 import { FontAwesome } from "@expo/vector-icons";
 import { useFinancialData } from "../../context/FinancialContext";
+import { getUtf8ByteLength, truncateToUtf8Bytes } from "../../utils/utf8";
 
 // --- COLORES DE MARCA ---
 const COLORS = {
@@ -154,11 +155,12 @@ export default function EntrevistaScreen() {
               <InputWithMic
                 label="Nombre Completo"
                 value={nombreCliente}
-                onChange={(t) => setNombreCliente(t)}
+                onChange={(t) => setNombreCliente(truncateToUtf8Bytes(t, 100))}
                 placeholder="Nombre del Prospecto"
                 filter="name"
                 autoCapitalize="words"
-                maxLength={60}
+                maxLength={100}
+                maxUtf8Bytes={100}
               />
             </View>
 
@@ -198,7 +200,7 @@ export default function EntrevistaScreen() {
                 placeholder="Ej. Arquitecto"
                 filter="name_with_comma"
                 autoCapitalize="words"
-                maxLength={50}
+                maxLength={250}
               />
             </View>
 
@@ -530,6 +532,7 @@ interface InputProps {
   placeholder?: string;
   keyboardType?: KeyboardTypeOptions;
   maxLength?: number;
+  maxUtf8Bytes?: number;
   autoCapitalize?: "none" | "sentences" | "words" | "characters";
   filter?: FilterType;
 }
@@ -563,6 +566,7 @@ const InputWithMic = ({
   placeholder,
   keyboardType,
   maxLength,
+  maxUtf8Bytes,
   autoCapitalize,
   filter,
 }: InputProps) => {
@@ -600,6 +604,10 @@ const InputWithMic = ({
         break;
     }
 
+    if (maxUtf8Bytes && maxUtf8Bytes > 0) {
+      cleanText = truncateToUtf8Bytes(cleanText, maxUtf8Bytes);
+    }
+
     onChange(cleanText);
   };
 
@@ -607,6 +615,9 @@ const InputWithMic = ({
   if (filter === "phone") {
     displayValue = formatPhoneVisually(value);
   }
+
+  const currentUtf8Bytes = maxUtf8Bytes ? getUtf8ByteLength(value || "") : 0;
+  const showByteHint = Boolean(maxUtf8Bytes && currentUtf8Bytes >= Math.floor(maxUtf8Bytes * 0.8));
 
   return (
     <View
@@ -616,7 +627,22 @@ const InputWithMic = ({
         marginRight: half ? 10 : 0,
       }}
     >
-      <Text style={styles.label}>{label}</Text>
+      <View style={{ flexDirection: "row", justifyContent: "space-between", alignItems: "center" }}>
+        <Text style={styles.label}>{label}</Text>
+        {showByteHint && (
+          <Text
+            style={{
+              fontSize: 10,
+              fontWeight: "600",
+              color: currentUtf8Bytes >= (maxUtf8Bytes || 0) ? "#ef4444" : COLORS.textoGris,
+              marginBottom: 6,
+              marginRight: 4,
+            }}
+          >
+            {currentUtf8Bytes}/{maxUtf8Bytes} bytes
+          </Text>
+        )}
+      </View>
       <View style={styles.inputContainer}>
         <TextInput
           style={styles.input}

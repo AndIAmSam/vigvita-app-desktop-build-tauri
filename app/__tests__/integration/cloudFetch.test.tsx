@@ -150,36 +150,34 @@ describe('Cloud Fetch — fetchSincronizadosNube', () => {
   });
 
   it('Needs_resync: copia activa se desmarca sincronizado', async () => {
+    const resyncUuid = '11111111-1111-4111-8111-111111111111';
     const mockStorage = require('@react-native-async-storage/async-storage');
     mockStorage.getItem.mockImplementation(async (key: string) => {
       if (key === 'advisor_session') return JSON.stringify(FIXTURES.SESSION());
       if (key === 'clientes_db') {
         return JSON.stringify([
-          FIXTURES.SAVED_CLIENT({ id: 'resync-me', serverId: 'srv-resync', sincronizado: true }),
+          FIXTURES.SAVED_CLIENT({ id: 'resync-me', serverId: resyncUuid, sincronizado: true }),
         ]);
       }
       return null;
     });
 
-    let syncCalled = false;
     global.fetch = jest.fn((url: string, opts?: any) => {
-      if (url.includes('/api/profiles') && !url.includes('/api/profiles/') && !opts?.method) {
+      if (url.includes('/api/profiles') && !url.includes('/api/profiles/') && (!opts?.method || opts.method === 'GET')) {
         return Promise.resolve({
           ok: true, status: 200,
           json: () => Promise.resolve({
             profiles: [
-              { id: 'srv-resync', client_name: 'Resync Me', needs_resync: true }
+              { id: resyncUuid, client_name: 'Resync Me', needs_resync: true }
             ]
           }),
         });
       }
-      // POST from forceSync triggered by resync
       if (opts?.method === 'POST') {
-        syncCalled = true;
         return Promise.resolve({
           ok: true, status: 201,
-          json: () => Promise.resolve({ data: ['srv-resync'] }),
-          text: () => Promise.resolve(''),
+          json: () => Promise.resolve({ data: [] }),
+          text: () => Promise.resolve('{"data":[]}'),
         });
       }
       return Promise.resolve({ ok: true, status: 200, json: () => Promise.resolve({}), text: () => Promise.resolve('') });
@@ -191,36 +189,36 @@ describe('Cloud Fetch — fetchSincronizadosNube', () => {
     await act(async () => { await ctx.fetchSincronizadosNube(); });
     await act(async () => { jest.runAllTimers(); });
 
-    // The local client should now be marked for resync
+    // Aserción incondicional: clientes_db DEBE haberse persistido con sincronizado: false
     const mockCalls = mockStorage.setItem.mock.calls.filter((c: any) => c[0] === 'clientes_db');
-    if (mockCalls.length > 0) {
-      const saved = JSON.parse(mockCalls[mockCalls.length - 1][1]);
-      const resyncClient = saved.find((c: any) => c.serverId === 'srv-resync');
-      expect(resyncClient).toBeDefined();
-      expect(resyncClient.sincronizado).toBe(false);
-    }
+    expect(mockCalls.length).toBeGreaterThan(0);
+    const saved = JSON.parse(mockCalls[mockCalls.length - 1][1]);
+    const resyncClient = saved.find((c: any) => c.serverId === resyncUuid);
+    expect(resyncClient).toBeDefined();
+    expect(resyncClient.sincronizado).toBe(false);
   });
 
   it('Needs_resync: rescate del archivo muerto', async () => {
+    const archivedUuid = '22222222-2222-4222-8222-222222222222';
     const mockStorage = require('@react-native-async-storage/async-storage');
     mockStorage.getItem.mockImplementation(async (key: string) => {
       if (key === 'advisor_session') return JSON.stringify(FIXTURES.SESSION());
       if (key === 'clientes_db') return JSON.stringify([]); // Empty active list
       if (key === 'clientes_archive_db') {
         return JSON.stringify([
-          FIXTURES.SAVED_CLIENT({ id: 'archived', serverId: 'srv-archived', nombre: 'Archived Client' }),
+          FIXTURES.SAVED_CLIENT({ id: 'archived', serverId: archivedUuid, nombre: 'Archived Client' }),
         ]);
       }
       return null;
     });
 
     global.fetch = jest.fn((url: string, opts?: any) => {
-      if (url.includes('/api/profiles') && !url.includes('/api/profiles/') && !opts?.method) {
+      if (url.includes('/api/profiles') && !url.includes('/api/profiles/') && (!opts?.method || opts.method === 'GET')) {
         return Promise.resolve({
           ok: true, status: 200,
           json: () => Promise.resolve({
             profiles: [
-              { id: 'srv-archived', client_name: 'Archived Client', needs_resync: true }
+              { id: archivedUuid, client_name: 'Archived Client', needs_resync: true }
             ]
           }),
         });
@@ -228,8 +226,8 @@ describe('Cloud Fetch — fetchSincronizadosNube', () => {
       if (opts?.method === 'POST') {
         return Promise.resolve({
           ok: true, status: 201,
-          json: () => Promise.resolve({ data: ['srv-archived'] }),
-          text: () => Promise.resolve(''),
+          json: () => Promise.resolve({ data: [] }),
+          text: () => Promise.resolve('{"data":[]}'),
         });
       }
       return Promise.resolve({ ok: true, status: 200, json: () => Promise.resolve({}), text: () => Promise.resolve('') });
@@ -241,21 +239,18 @@ describe('Cloud Fetch — fetchSincronizadosNube', () => {
     await act(async () => { await ctx.fetchSincronizadosNube(); });
     await act(async () => { jest.runAllTimers(); });
 
-    // The archived client should have been rescued and added to active list
+    // Aserciones incondicionales: rescatado a clientes_db y removido de clientes_archive_db
     const mockCalls = mockStorage.setItem.mock.calls.filter((c: any) => c[0] === 'clientes_db');
-    if (mockCalls.length > 0) {
-      const saved = JSON.parse(mockCalls[mockCalls.length - 1][1]);
-      const rescued = saved.find((c: any) => c.serverId === 'srv-archived');
-      expect(rescued).toBeDefined();
-      expect(rescued.sincronizado).toBe(false); // Ready to re-upload
-    }
+    expect(mockCalls.length).toBeGreaterThan(0);
+    const saved = JSON.parse(mockCalls[mockCalls.length - 1][1]);
+    const rescued = saved.find((c: any) => c.serverId === archivedUuid);
+    expect(rescued).toBeDefined();
+    expect(rescued.sincronizado).toBe(false);
 
-    // Should also be removed from archive
     const archiveCalls = mockStorage.setItem.mock.calls.filter((c: any) => c[0] === 'clientes_archive_db');
-    if (archiveCalls.length > 0) {
-      const archive = JSON.parse(archiveCalls[archiveCalls.length - 1][1]);
-      expect(archive.find((c: any) => c.serverId === 'srv-archived')).toBeUndefined();
-    }
+    expect(archiveCalls.length).toBeGreaterThan(0);
+    const archive = JSON.parse(archiveCalls[archiveCalls.length - 1][1]);
+    expect(archive.find((c: any) => c.serverId === archivedUuid)).toBeUndefined();
   });
 
   it('Sin conexión muestra alerta y no hace fetch', async () => {
@@ -349,5 +344,140 @@ describe('Cloud Fetch — fetchSincronizadosNube', () => {
     expect(cloudClient).toBeDefined();
     expect(cloudClient.asesorAsignado?.nombre).toBe('Asesor Destino');
     expect(cloudClient.creadoPor).toBe('Líder Creador');
+  });
+
+  it('API v16 — Advisor_Trainee nunca llama a GET /api/profiles', async () => {
+    const mockStorage = require('@react-native-async-storage/async-storage');
+    mockStorage.getItem.mockImplementation(async (key: string) => {
+      if (key === 'advisor_session') {
+        return JSON.stringify(FIXTURES.SESSION(FIXTURES.ADVISOR_TRAINING));
+      }
+      return null;
+    });
+
+    const calledUrls: string[] = [];
+    global.fetch = jest.fn((url: string) => {
+      calledUrls.push(url);
+      return Promise.resolve({
+        ok: true,
+        status: 200,
+        json: () => Promise.resolve({ access_expires_at: null }),
+      });
+    }) as jest.Mock;
+
+    root = await mountProvider();
+    await act(async () => { jest.runAllTimers(); });
+
+    await act(async () => { await ctx.fetchSincronizadosNube(); });
+
+    expect(calledUrls.some((u) => u.includes('/api/profiles'))).toBe(false);
+  });
+
+  it('API v16 — Hidrata asesorAsignado.id cuando /api/profile-advisors responde después de /api/profiles', async () => {
+    const advisorUuid = '77777777-7777-4777-8777-777777777777';
+    const leaderUser = { ...FIXTURES.ADVISOR, isLider: true };
+    const mockStorage = require('@react-native-async-storage/async-storage');
+    mockStorage.getItem.mockImplementation(async (key: string) => {
+      if (key === 'advisor_session') return JSON.stringify(FIXTURES.SESSION(leaderUser));
+      return null;
+    });
+
+    let returnAdvisors = false;
+    global.fetch = jest.fn((url: string) => {
+      if (url.includes('/api/profile-advisors')) {
+        return Promise.resolve({
+          ok: true,
+          status: 200,
+          json: () =>
+            Promise.resolve({
+              advisors: returnAdvisors ? [{ id: advisorUuid, name: 'Asesor Tardío' }] : [],
+            }),
+        });
+      }
+      if (url.includes('/api/profiles') && !url.includes('/api/profiles/')) {
+        return Promise.resolve({
+          ok: true,
+          status: 200,
+          json: () =>
+            Promise.resolve({
+              profiles: [
+                {
+                  id: '88888888-8888-4888-8888-888888888888',
+                  client_name: 'Cliente de SuperAdmin',
+                  status: 'pending',
+                  created_at: '2026-04-22T00:00:00Z',
+                  relationship: { created_for: 'Asesor Tardío' },
+                },
+              ],
+            }),
+        });
+      }
+      return Promise.resolve({ ok: true, status: 200, json: () => Promise.resolve({ access_expires_at: null }) });
+    }) as jest.Mock;
+
+    root = await mountProvider();
+    await act(async () => { jest.runAllTimers(); });
+
+    // Primero carga la nube mientras equipoLider aún está vacío
+    await act(async () => { await ctx.fetchSincronizadosNube(); });
+    expect(ctx.listaNube[0].asesorAsignado?.nombre).toBe('Asesor Tardío');
+    expect(ctx.listaNube[0].asesorAsignado?.id).toBe('');
+
+    // Luego llega /api/profile-advisors -> debe hidratar el UUID automáticamente
+    returnAdvisors = true;
+    await act(async () => { await ctx.verificarLider(); });
+
+    expect(ctx.listaNube[0].asesorAsignado?.id).toBe(advisorUuid);
+  });
+
+  it('API v16 — cargarProspecto rescata datos de archivo muerto cuando GET /api/profiles/{id} devuelve needs_resync: true', async () => {
+    const profileUuid = '66666666-6666-4666-8666-666666666666';
+    const archivedCopy = FIXTURES.SAVED_CLIENT({
+      id: 'arch-1',
+      serverId: profileUuid,
+      nombre: 'Rescatado en Apertura',
+    });
+
+    const mockStorage = require('@react-native-async-storage/async-storage');
+    mockStorage.getItem.mockImplementation(async (key: string) => {
+      if (key === 'advisor_session') return JSON.stringify(FIXTURES.SESSION());
+      if (key === 'clientes_archive_db') return JSON.stringify([archivedCopy]);
+      return null;
+    });
+
+    global.fetch = jest.fn((url: string) => {
+      if (url.includes(`/api/profiles/${profileUuid}`)) {
+        return Promise.resolve({
+          ok: true,
+          status: 200,
+          json: () =>
+            Promise.resolve({
+              id: profileUuid,
+              client_name: 'Rescatado en Apertura',
+              needs_resync: true,
+              data: null,
+            }),
+        });
+      }
+      return Promise.resolve({ ok: true, status: 200, json: () => Promise.resolve({ profiles: [], access_expires_at: null }) });
+    }) as jest.Mock;
+
+    root = await mountProvider();
+    await act(async () => { jest.runAllTimers(); });
+
+    await act(async () => {
+      await ctx.cargarProspecto({
+        id: profileUuid,
+        serverId: profileUuid,
+        nombre: 'Rescatado en Apertura',
+        fechaCreacion: '01/01/2026',
+        sincronizado: true,
+        data: {},
+      });
+    });
+
+    // Debe haber restaurado el teléfono completo desde el archivo muerto, no datos vacíos
+    expect(ctx.perfil.telefono).toBe('5551234567');
+    expect(ctx.listaClientes.some((c: any) => c.serverId === profileUuid && c.sincronizado === false)).toBe(true);
   });
 });

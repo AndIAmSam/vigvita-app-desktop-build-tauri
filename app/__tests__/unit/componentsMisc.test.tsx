@@ -72,10 +72,10 @@ describe('MovingBackground Component', () => {
 
   it('Genera los blobs atmosféricos, ejecuta animación de rebote y cancela al desmontarse', () => {
     const { Dimensions } = require('react-native');
-    let dimHandler: any = null;
-    jest.spyOn(Dimensions, 'addEventListener').mockImplementation((event: string, handler: any) => {
-      dimHandler = handler;
-      return { remove: jest.fn() } as any;
+    let dimHandler: ((dims: any) => void) | null = null;
+    jest.spyOn(Dimensions, 'addEventListener').mockImplementation((...args: unknown[]) => {
+      dimHandler = args[1] as (dims: any) => void;
+      return { remove: jest.fn() };
     });
 
     let root: any;
@@ -85,20 +85,18 @@ describe('MovingBackground Component', () => {
 
     expect(root.toJSON()).toBeTruthy();
     expect(global.requestAnimationFrame).toHaveBeenCalled();
+    expect(animCallback).toBeTruthy();
+    expect(dimHandler).toBeTruthy();
 
     // Ejecutar el paso de animación (cubre cálculo de velocidad y rebote)
-    if (animCallback) {
-      act(() => {
-        animCallback();
-      });
-    }
+    act(() => {
+      animCallback();
+    });
 
     // Disparar cambio de dimensiones de pantalla
-    if (dimHandler) {
-      act(() => {
-        dimHandler({ window: { width: 1200, height: 800, scale: 1, fontScale: 1 } });
-      });
-    }
+    act(() => {
+      dimHandler!({ window: { width: 1200, height: 800, scale: 1, fontScale: 1 } });
+    });
 
     act(() => {
       root.unmount();

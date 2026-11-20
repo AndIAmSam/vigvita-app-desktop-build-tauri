@@ -148,11 +148,12 @@ describe('Dependent & Family Sync, Calculations & Referrals', () => {
     act(() => {
       ctx.updateReferido(refId, 'nombre', 'Carlos Mendoza');
       ctx.updateReferido(refId, 'telefono', '555-123-4567');
-      ctx.updateReferido(refId, 'calificacion', '4');
+      ctx.updateReferido(refId, 'notas', 'Interesado en retiro');
     });
 
     expect(ctx.referidos[0].nombre).toBe('Carlos Mendoza');
     expect(ctx.referidos[0].telefono).toBe('555-123-4567');
+    expect(ctx.referidos[0].notas).toBe('Interesado en retiro');
 
     // upsertReferido: actualizar existente
     act(() => {
@@ -162,11 +163,15 @@ describe('Dependent & Family Sync, Calculations & Referrals', () => {
         telefono: '555-999-8888',
         edad: '35',
         ocupacion: 'Ingeniero',
-        hijos: '2',
-        calificacion: '5',
+        estadoCivil: 'Casado',
+        entorno: 'Profesional',
+        grupoFamiliar: 'Colega',
+        notas: 'Seguimiento lunes',
       });
     });
     expect(ctx.referidos[0].nombre).toBe('Carlos Mendoza Actualizado');
+    expect(ctx.referidos[0].entorno).toBe('Profesional');
+    expect(ctx.referidos[0].notas).toBe('Seguimiento lunes');
 
     // upsertReferido: agregar nuevo
     act(() => {
@@ -176,11 +181,14 @@ describe('Dependent & Family Sync, Calculations & Referrals', () => {
         telefono: '555-000-1111',
         edad: '28',
         ocupacion: 'Doctora',
-        hijos: '0',
-        calificacion: '5',
+        estadoCivil: 'Soltera',
+        entorno: 'Social',
+        grupoFamiliar: 'Amiga',
+        notas: 'Referida por Carlos',
       });
     });
     expect(ctx.referidos.length).toBe(2);
+    expect(ctx.referidos[1].grupoFamiliar).toBe('Amiga');
 
     // removeReferido
     act(() => {
